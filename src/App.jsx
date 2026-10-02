@@ -189,9 +189,9 @@ export default function App() {
     }
   }
 
-  const loginAdmin = async (username, password) => {
+  const loginAdmin = async (password) => {
     try {
-      const data = await api('/api/auth/admin', { method: 'POST', body: { username, password } })
+      const data = await api('/api/auth/admin', { method: 'POST', body: { password } })
       sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token)
       sessionStorage.removeItem(TEAM_TOKEN_KEY)
       sessionStorage.removeItem(TEAM_ID_KEY)
@@ -500,13 +500,12 @@ function TeamPortal({ team, screen, stage, activeMode, index, isActive, logoutTe
 }
 
 function AdminLoginModal({ loginAdmin, onClose = null, onSuccess, canLaunch = false }) {
-  const [username, setUsername] = useState('admin')
-  const [password, setPassword] = useState('admin12')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
   const submit = async (e) => {
     e.preventDefault()
-    const result = await loginAdmin(username, password)
+    const result = await loginAdmin(password)
     if (!result.ok) { setError(result.message); return }
     onSuccess?.()
   }
@@ -518,8 +517,7 @@ function AdminLoginModal({ loginAdmin, onClose = null, onSuccess, canLaunch = fa
         <span className="summary-label">ACCÈS ADMINISTRATEUR</span>
         <h2>Console du challenge</h2>
         <p>Connexion requise pour lancer les manches et attribuer ou corriger les points.</p>
-        <label><small>Identifiant</small><input autoFocus value={username} onChange={e => setUsername(e.target.value)} autoComplete="username"/></label>
-        <label><small>Mot de passe</small><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" placeholder="Mot de passe"/></label>
+        <label><small>Mot de passe administrateur</small><input autoFocus type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" placeholder="Mot de passe"/></label>
         {error && <div className="admin-login-error">{error}</div>}
         <div className="admin-modal-actions">
           {onClose && <button className="secondary-btn" type="button" onClick={onClose}>Annuler</button>}
@@ -658,7 +656,7 @@ function Registration({ teams, startCompetition, adminAuthenticated, loginAdmin,
           {!adminAuthenticated && <button className="secondary-btn admin-entry-btn" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={16}/> Connexion admin</button>}
         </div>
         {adminAuthenticated && <div className="admin-ready-panel">
-          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>admin · connexion validée · cliquez sur Lancer les qualifications</small></span></div>
+          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>Connexion validée · cliquez sur Lancer les qualifications</small></span></div>
           <button className="primary-btn launch-competition" onClick={launch} disabled={!isReady}><Play size={17}/> Lancer les qualifications</button>
         </div>}
         {!adminAuthenticated && <button className="primary-btn wide launch-competition" onClick={launch}><LogIn size={17}/> Connexion admin puis lancement</button>}

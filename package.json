@@ -1,19 +1,23 @@
 {
-  "name": "network-champion",
+  "name": "bootcamp-champion-v13-admin-fix",
   "private": true,
-  "version": "1.0.0",
+  "version": "13.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
+    "server": "node server.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "start": "node server.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "express": "^5.1.0",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "socket.io-client": "^4.8.4",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "vite": "latest"
-  }
+  },
+  "devDependencies": {}
 }

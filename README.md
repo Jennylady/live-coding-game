@@ -1,26 +1,41 @@
-# Network Champion — Atelier Réseaux
+# Bootcamp Champion V14 — correction admin
 
-Mini-site React + Vite pour animer un atelier réseau en équipes, dans l'esprit de « Question pour un champion ».
+## Correction principale
 
-## Fonctionnalités
-- 2 équipes avec score persistant entre les manches
-- Manche « Qui suis-je ? » avec 4 indices progressifs, buzzer clavier A/L, points 40/30/20/10
-- Sprint QCM chronométré
-- Finale technique avec subnetting et scénarios de dépannage
-- Correction et explication immédiates
-- Questions centralisées dans `src/data/questions.js`
-- Responsive desktop/mobile
+La V12 avait un bug de restauration de session : quand aucune équipe n’était enregistrée dans le navigateur, `sessionStorage.getItem(...)` retournait `null`, puis `Number(null)` devenait `0`. Le navigateur pouvait donc entrer automatiquement dans **Cookies** et empêcher l’accès normal à l’admin.
 
-## Lancer
+La V14 vérifie maintenant explicitement qu’un identifiant d’équipe existe avant de restaurer une session participant.
+
+## Administrateur
+
+- Identifiant : `admin`
+- Mot de passe : `admin12`
+
+Après connexion, l’admin reste sur l’écran d’accueil avec le badge **ADMIN**, puis clique volontairement sur **Lancer les qualifications**. La connexion et le lancement sont séparés pour rendre les erreurs plus faciles à voir.
+
+## Participants
+
+- Cookies
+- EVH
+- N4SC
+
+Aucun mot de passe participant. Ils choisissent leur équipe et attendent le lancement.
+
+## État
+
+Aucun fichier persistant. Scores, phase et buzz sont gardés en mémoire du serveur jusqu’au redémarrage.
+
+## Lancement
+
 ```bash
 npm install
-npm run dev
+npm run build
+npm start
 ```
 
-## Modifier les questions
-Éditer `src/data/questions.js` :
-- `championQuestions` : indices progressifs + réponses acceptées
-- `sprintQuestions` : QCM rapides
-- `finalQuestions` : scénarios plus difficiles
+Vérification serveur : `/api/health` doit renvoyer `version: 13`.
 
-Les touches `A` et `L` servent de buzzers pour les deux équipes pendant la manche « Qui suis-je ? ».
+
+## Accès administrateur simplifié
+
+Il n'y a plus d'identifiant administrateur. Le formulaire demande uniquement le mot de passe statique `admin12`. Ce mot de passe est fixé directement dans `server.js` et n'est plus lu depuis une variable d'environnement.
