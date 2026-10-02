@@ -19,11 +19,15 @@ import {
 const KEYS = ['a', 'g', 'l']
 const KEY_LABELS = ['A', 'G', 'L']
 const DEFAULT_ADMIN = { username: 'admin', password: 'admin12' }
+const STATE_KEY = 'bootcamp-champion-state-v6'
+const ADMIN_KEY = 'bootcamp-champion-admin-v6'
+const TEAM_KEY = 'bootcamp-champion-team-v6'
+const BUZZ_KEY = 'bootcamp-champion-buzz-v6'
 
 const emptyTeams = () => [
-  { id: 0, name: '', members: [], score: 0, registered: false },
-  { id: 1, name: '', members: [], score: 0, registered: false },
-  { id: 2, name: '', members: [], score: 0, registered: false },
+  { id: 0, name: '', members: [], score: 0, registered: false, accessCode: '' },
+  { id: 1, name: '', members: [], score: 0, registered: false, accessCode: '' },
+  { id: 2, name: '', members: [], score: 0, registered: false, accessCode: '' },
 ]
 
 const normalize = (value = '') => value
@@ -64,6 +68,24 @@ const FINAL_MODES = [
   { id: 'finalPython', title: 'Live Code · Python final', subtitle: '2 exercices · points manuels', meta: 'FINALE 04', icon: Code2, tone: 'amber' },
 ]
 
+function questionsForMode(mode) {
+  if (mode === 'quiz') return quizQuestions
+  if (mode === 'champion') return championQuestions
+  if (mode === 'bash') return bashChallenges
+  if (mode === 'python') return pythonChallenges
+  if (mode === 'finalQuiz') return finalQuizQuestions
+  if (mode === 'finalChampion') return finalChampionQuestions
+  if (mode === 'finalBash') return finalBashChallenges
+  if (mode === 'finalPython') return finalPythonChallenges
+  return []
+}
+
+function emitTeamBuzz(teamId) {
+  const payload = { teamId, at: Date.now(), nonce: Math.random().toString(36).slice(2) }
+  try { localStorage.setItem(BUZZ_KEY, JSON.stringify(payload)) } catch {}
+  window.dispatchEvent(new CustomEvent('bootcamp-team-buzz', { detail: payload }))
+}
+
 export default function App() {
   const [screen, setScreen] = useState('registration')
   const [stage, setStage] = useState('qualification')
@@ -75,45 +97,72 @@ export default function App() {
   const [index, setIndex] = useState(0)
   const [roundDone, setRoundDone] = useState(false)
   const [adminAuthenticated, setAdminAuthenticated] = useState(false)
+  const [teamSessionId, setTeamSessionId] = useState(null)
 
   useEffect(() => {
-    setAdminAuthenticated(sessionStorage.getItem('bootcamp-champion-admin-v5') === '1')
-    const saved = localStorage.getItem('bootcamp-champion-state-v5')
+    setAdminAuthenticated(sessionStorage.getItem(ADMIN_KEY) === '1')
+    const rawTeam = sessionStorage.getItem(TEAM_KEY)
+    if (rawTeam !== null && rawTeam !== '') setTeamSessionId(Number(rawTeam))
+    const saved = localStorage.getItem(STATE_KEY)
     if (!saved) return
     try {
       const state = JSON.parse(saved)
-      if (state?.teams?.length === 3) setTeams(state.teams)
+      if (state?.teams?.length === 3) setTeams(state.teams.map(t => ({ accessCode: '', ...t })))
       if (Array.isArray(state?.finalists)) setFinalists(state.finalists)
       if (Array.isArray(state?.qualificationSnapshot)) setQualificationSnapshot(state.qualificationSnapshot)
-      if (['registration', 'lobby', 'finalists', 'winner'].includes(state?.screen)) setScreen(state.screen)
+      if (['registration', 'lobby', 'finalists', 'winner', 'game'].includes(state?.screen)) setScreen(state.screen)
       if (['qualification', 'final'].includes(state?.stage)) setStage(state.stage)
+      if (state?.activeMode) { setActiveMode(state.activeMode); setQuestionSet([...questionsForMode(state.activeMode)]) }
+      if (Number.isInteger(state?.index)) setIndex(state.index)
+      if (typeof state?.roundDone === 'boolean') setRoundDone(state.roundDone)
     } catch {}
   }, [])
 
   useEffect(() => {
-    if (screen === 'game') return
-    localStorage.setItem('bootcamp-champion-state-v5', JSON.stringify({ teams, finalists, qualificationSnapshot, screen, stage }))
-  }, [teams, finalists, qualificationSnapshot, screen, stage])
+    const serialized = JSON.stringify({ teams, finalists, qualificationSnapshot, screen, stage, activeMode, index, roundDone })
+    if (localStorage.getItem(STATE_KEY) !== serialized) localStorage.setItem(STATE_KEY, serialized)
+  }, [teams, finalists, qualificationSnapshot, screen, stage, activeMode, index, roundDone])
+
+  useEffect(() => {
+    const sync = event => {
+      if (event.key !== STATE_KEY || !event.newValue) return
+      try {
+        const state = JSON.parse(event.newValue)
+        if (state?.teams?.length === 3) setTeams(state.teams.map(t => ({ accessCode: '', ...t })))
+        if (Array.isArray(state?.finalists)) setFinalists(state.finalists)
+        if (Array.isArray(state?.qualificationSnapshot)) setQualificationSnapshot(state.qualificationSnapshot)
+        if (['registration', 'lobby', 'finalists', 'winner', 'game'].includes(state?.screen)) setScreen(state.screen)
+        if (['qualification', 'final'].includes(state?.stage)) setStage(state.stage)
+        if (state?.activeMode) { setActiveMode(state.activeMode); setQuestionSet([...questionsForMode(state.activeMode)]) }
+        if (Number.isInteger(state?.index)) setIndex(state.index)
+        if (typeof state?.roundDone === 'boolean') setRoundDone(state.roundDone)
+      } catch {}
+    }
+    window.addEventListener('storage', sync)
+    return () => window.removeEventListener('storage', sync)
+  }, [])
 
   const activeTeamIds = stage === 'final' ? finalists : teams.map(t => t.id)
   const visibleTeams = teams.filter(t => activeTeamIds.includes(t.id))
 
-  const registerTeam = ({ name, members }) => {
+  const registerTeam = ({ name, members, accessCode }) => {
     const cleanName = name.trim()
     const cleanMembers = members.map(member => member.trim()).filter(Boolean)
+    const cleanCode = accessCode.trim()
     if (!cleanName) return { ok: false, message: "Entrez le nom de l'équipe." }
     if (!cleanMembers.length) return { ok: false, message: 'Ajoutez au moins un membre.' }
+    if (cleanCode.length < 4) return { ok: false, message: 'Choisissez un code équipe d’au moins 4 caractères.' }
     if (teams.some(team => team.registered && normalize(team.name) === normalize(cleanName))) {
       return { ok: false, message: 'Ce nom d’équipe est déjà inscrit.' }
     }
     const slot = teams.find(team => !team.registered)
     if (!slot) return { ok: false, message: 'Les 3 places sont déjà occupées.' }
-    setTeams(list => list.map(team => team.id === slot.id ? { ...team, name: cleanName, members: cleanMembers, registered: true, score: 0 } : team))
+    setTeams(list => list.map(team => team.id === slot.id ? { ...team, name: cleanName, members: cleanMembers, registered: true, score: 0, accessCode: cleanCode } : team))
     return { ok: true, teamId: slot.id }
   }
 
   const unregisterTeam = (id) => {
-    setTeams(list => list.map(team => team.id === id ? { id: team.id, name: '', members: [], score: 0, registered: false } : team))
+    setTeams(list => list.map(team => team.id === id ? { id: team.id, name: '', members: [], score: 0, registered: false, accessCode: '' } : team))
   }
 
   const addScore = (id, points) => setTeams(list => list.map(team => team.id === id ? { ...team, score: Math.max(0, team.score + Number(points || 0)) } : team))
@@ -122,14 +171,31 @@ export default function App() {
     if (username.trim() !== DEFAULT_ADMIN.username || password !== DEFAULT_ADMIN.password) {
       return { ok: false, message: 'Identifiant ou mot de passe incorrect.' }
     }
-    sessionStorage.setItem('bootcamp-champion-admin-v5', '1')
+    sessionStorage.setItem(ADMIN_KEY, '1')
+    sessionStorage.removeItem(TEAM_KEY)
+    setTeamSessionId(null)
     setAdminAuthenticated(true)
     return { ok: true }
   }
 
   const logoutAdmin = () => {
-    sessionStorage.removeItem('bootcamp-champion-admin-v5')
+    sessionStorage.removeItem(ADMIN_KEY)
     setAdminAuthenticated(false)
+  }
+
+  const loginTeam = (name, accessCode) => {
+    const found = teams.find(team => team.registered && normalize(team.name) === normalize(name) && team.accessCode === accessCode)
+    if (!found) return { ok: false, message: 'Nom d’équipe ou code de connexion incorrect.' }
+    sessionStorage.removeItem(ADMIN_KEY)
+    setAdminAuthenticated(false)
+    sessionStorage.setItem(TEAM_KEY, String(found.id))
+    setTeamSessionId(found.id)
+    return { ok: true, teamId: found.id }
+  }
+
+  const logoutTeam = () => {
+    sessionStorage.removeItem(TEAM_KEY)
+    setTeamSessionId(null)
   }
 
   const startCompetition = (forceAdmin = false) => {
@@ -144,15 +210,7 @@ export default function App() {
   }
 
   const startMode = (mode) => {
-    let set = []
-    if (mode === 'quiz') set = quizQuestions
-    if (mode === 'champion') set = championQuestions
-    if (mode === 'bash') set = bashChallenges
-    if (mode === 'python') set = pythonChallenges
-    if (mode === 'finalQuiz') set = finalQuizQuestions
-    if (mode === 'finalChampion') set = finalChampionQuestions
-    if (mode === 'finalBash') set = finalBashChallenges
-    if (mode === 'finalPython') set = finalPythonChallenges
+    const set = questionsForMode(mode)
     // Ordre pédagogique conservé : du plus accessible au plus technique.
     setQuestionSet([...set])
     setIndex(0)
@@ -186,7 +244,10 @@ export default function App() {
   }
 
   const resetAll = () => {
-    localStorage.removeItem('bootcamp-champion-state-v5')
+    localStorage.removeItem(STATE_KEY)
+    localStorage.removeItem(BUZZ_KEY)
+    sessionStorage.removeItem(TEAM_KEY)
+    setTeamSessionId(null)
     setTeams(emptyTeams())
     setFinalists([])
     setQualificationSnapshot([])
@@ -196,6 +257,18 @@ export default function App() {
     setQuestionSet([])
     setIndex(0)
     setRoundDone(false)
+  }
+
+  if (teamSessionId !== null && !adminAuthenticated) {
+    const team = teams.find(t => t.id === teamSessionId && t.registered)
+    if (team) {
+      return (
+        <div className="app-shell">
+          <Background />
+          <TeamPortal team={team} screen={screen} stage={stage} activeMode={activeMode} index={index} logoutTeam={logoutTeam} />
+        </div>
+      )
+    }
   }
 
   if (screen !== 'registration' && !adminAuthenticated) {
@@ -214,7 +287,7 @@ export default function App() {
       <Header stage={stage} screen={screen} resetAll={resetAll} adminAuthenticated={adminAuthenticated} logoutAdmin={logoutAdmin} />
 
       {screen === 'registration' && (
-        <Registration teams={teams} registerTeam={registerTeam} unregisterTeam={unregisterTeam} startCompetition={startCompetition} adminAuthenticated={adminAuthenticated} loginAdmin={loginAdmin} />
+        <Registration teams={teams} registerTeam={registerTeam} unregisterTeam={unregisterTeam} startCompetition={startCompetition} adminAuthenticated={adminAuthenticated} loginAdmin={loginAdmin} loginTeam={loginTeam} />
       )}
 
       {screen === 'lobby' && (
@@ -263,9 +336,72 @@ export default function App() {
 }
 
 
+function TeamLoginModal({ loginTeam, onClose }) {
+  const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const submit = e => {
+    e.preventDefault()
+    const result = loginTeam(name, code)
+    if (!result.ok) { setError(result.message); return }
+    onClose?.()
+  }
+  return (
+    <div className="admin-modal-backdrop" role="dialog" aria-modal="true">
+      <form className="admin-modal team-login-modal glass" onSubmit={submit}>
+        <div className="admin-modal-icon team-icon"><Users size={24}/></div>
+        <span className="summary-label">CONNEXION ÉQUIPE</span>
+        <h2>Entrer dans le challenge</h2>
+        <p>Utilisez le nom exact de votre équipe et le code choisi lors de l’inscription.</p>
+        <label><small>Nom de l’équipe</small><input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="Ex. Root Force"/></label>
+        <label><small>Code équipe</small><input type="password" value={code} onChange={e => setCode(e.target.value)} placeholder="Votre code"/></label>
+        {error && <div className="admin-login-error">{error}</div>}
+        <div className="admin-modal-actions">
+          <button className="secondary-btn" type="button" onClick={onClose}>Annuler</button>
+          <button className="primary-btn" type="submit"><LogIn size={17}/> Connexion équipe</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function TeamPortal({ team, screen, stage, activeMode, index, logoutTeam }) {
+  const canBuzz = screen === 'game'
+  const labels = {
+    quiz: 'Quiz · choix multiple', champion: 'Question pour un champion', bash: 'Live Code · Bash', python: 'Live Code · Python système',
+    finalQuiz: 'Quiz final', finalChampion: 'Champion final', finalBash: 'Bash final', finalPython: 'Python final'
+  }
+  return (
+    <main className="team-portal-page">
+      <section className="team-portal glass">
+        <div className="team-portal-top">
+          <div className="brand"><div className="brand-icon"><Network size={19}/></div><div><strong>BOOTCAMP</strong><span>CHAMPION</span></div></div>
+          <button className="tiny-btn" onClick={logoutTeam}><LogOut size={14}/> Quitter</button>
+        </div>
+        <div className={`team-portal-orb team-${team.id}`}><Users size={31}/></div>
+        <span className="summary-label">ESPACE ÉQUIPE</span>
+        <h1>{team.name}</h1>
+        <p>{team.members.join(' · ')}</p>
+        <div className="team-portal-stats">
+          <div><span>Score</span><strong>{team.score}</strong><small>pts</small></div>
+          <div><span>Buzzer</span><strong>{KEY_LABELS[team.id]}</strong><small>touche</small></div>
+          <div><span>Phase</span><strong>{stage === 'qualification' ? 'QUALIF' : 'FINALE'}</strong><small>{screen}</small></div>
+        </div>
+        <div className={`team-status-card ${canBuzz ? 'live' : ''}`}>
+          {canBuzz ? <><Zap size={19}/><div><strong>{labels[activeMode] || 'Épreuve en cours'}</strong><span>Challenge {index + 1} · buzzez quand votre équipe souhaite répondre.</span></div></> : <><Clock3 size={19}/><div><strong>En attente de l’animateur</strong><span>{screen === 'registration' ? 'Les inscriptions sont encore ouvertes.' : 'Attendez le lancement de la prochaine épreuve.'}</span></div></>}
+        </div>
+        <button className={`team-buzz-big ${canBuzz ? 'ready' : ''}`} disabled={!canBuzz} onClick={() => emitTeamBuzz(team.id)}>
+          <Zap size={31}/><span>{canBuzz ? 'JE RÉPONDS / BUZZ' : 'BUZZER EN ATTENTE'}</span><kbd>{KEY_LABELS[team.id]}</kbd>
+        </button>
+        <small className="team-portal-note">Cette version synchronise les onglets ouverts sur le même navigateur/origine. Pour plusieurs téléphones/PC indépendants, utilisez ensuite la version serveur temps réel.</small>
+      </section>
+    </main>
+  )
+}
+
 function AdminLoginModal({ loginAdmin, onClose = null, onSuccess, canLaunch = false }) {
   const [username, setUsername] = useState('admin')
-  const [password, setPassword] = useState('')
+  const [password, setPassword] = useState('admin12')
   const [error, setError] = useState('')
 
   const submit = (e) => {
@@ -352,24 +488,27 @@ function Header({ stage, screen, resetAll, adminAuthenticated, logoutAdmin }) {
   )
 }
 
-function Registration({ teams, registerTeam, unregisterTeam, startCompetition, adminAuthenticated, loginAdmin }) {
+function Registration({ teams, registerTeam, unregisterTeam, startCompetition, adminAuthenticated, loginAdmin, loginTeam }) {
   const [teamName, setTeamName] = useState('')
   const [membersText, setMembersText] = useState('')
+  const [accessCode, setAccessCode] = useState('')
   const [message, setMessage] = useState('')
   const [showAdminLogin, setShowAdminLogin] = useState(false)
+  const [showTeamLogin, setShowTeamLogin] = useState(false)
   const registered = teams.filter(team => team.registered)
   const isFull = registered.length === 3
 
   const submit = (event) => {
     event.preventDefault()
     const members = membersText.split(/[,;\n]/).map(member => member.trim()).filter(Boolean)
-    const result = registerTeam({ name: teamName, members })
+    const result = registerTeam({ name: teamName, members, accessCode })
     if (!result.ok) {
       setMessage(result.message)
       return
     }
     setTeamName('')
     setMembersText('')
+    setAccessCode('')
     setMessage(`Équipe inscrite. Buzzer attribué : ${KEY_LABELS[result.teamId]}.`)
   }
 
@@ -413,6 +552,11 @@ function Registration({ teams, registerTeam, unregisterTeam, startCompetition, a
               <textarea value={membersText} onChange={e => setMembersText(e.target.value)} placeholder="Alice, Bob, Charlie" rows={3}/>
               <em>Séparez les prénoms par des virgules.</em>
             </label>
+            <label>
+              <small>Code de connexion équipe</small>
+              <input type="password" value={accessCode} onChange={e => setAccessCode(e.target.value)} placeholder="Minimum 4 caractères" minLength={4}/>
+              <em>Ce code servira au bouton « Connexion équipe ».</em>
+            </label>
             <button className="primary-btn wide" type="submit">Inscrire mon équipe <ChevronRight size={18}/></button>
           </form>
         ) : (
@@ -437,10 +581,18 @@ function Registration({ teams, registerTeam, unregisterTeam, startCompetition, a
           ))}
         </div>
 
-        <div className="registration-note"><ShieldCheck size={17}/><span>Une fois les 3 équipes inscrites, seul l’administrateur peut lancer et piloter la compétition. Les touches A, G et L restent les buzzers des équipes.</span></div>
-        <button className="primary-btn wide launch-competition" onClick={launch} disabled={!isFull}>{adminAuthenticated ? 'Lancer les qualifications' : 'Connexion admin & lancement'} <ChevronRight size={18}/></button>
-        {!adminAuthenticated && <button className="admin-login-link" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={15}/> Accès administrateur</button>}
-        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={() => { setShowAdminLogin(false); if (isFull) startCompetition(true) }} canLaunch={isFull}/>}
+        <div className="registration-note"><ShieldCheck size={17}/><span>Les équipes se connectent avec leur nom + code. L’administrateur lance les manches et reste le seul à attribuer/corriger les points.</span></div>
+        <div className="entry-actions">
+          <button className="secondary-btn team-entry-btn" type="button" onClick={() => setShowTeamLogin(true)}><Users size={17}/> Connexion équipe</button>
+          {!adminAuthenticated && <button className="secondary-btn admin-entry-btn" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={16}/> Connexion admin</button>}
+        </div>
+        {adminAuthenticated && <div className="admin-ready-panel">
+          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>admin · prêt à lancer le challenge</small></span></div>
+          <button className="primary-btn launch-competition" onClick={() => startCompetition()} disabled={!isFull}><Play size={17}/> {isFull ? 'Lancer les qualifications' : `En attente des équipes (${registered.length}/3)`}</button>
+        </div>}
+        {!adminAuthenticated && isFull && <button className="primary-btn wide launch-competition" onClick={launch}><LogIn size={17}/> Connexion admin puis lancement</button>}
+        {showTeamLogin && <TeamLoginModal loginTeam={loginTeam} onClose={() => setShowTeamLogin(false)}/>} 
+        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={() => { setShowAdminLogin(false); if (isFull) setTimeout(() => startCompetition(true), 0) }} canLaunch={isFull}/>}
       </section>
     </main>
   )
@@ -607,6 +759,15 @@ function ChampionRound({ question, teams, addScore, next, finalMode = false }) {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  useEffect(() => {
+    const take = id => { const team = teams.find(t => t.id === Number(id)); if (team && buzzed === null && !result) buzz(team.id) }
+    const onCustom = e => take(e.detail?.teamId)
+    const onStorage = e => { if (e.key === BUZZ_KEY && e.newValue) { try { take(JSON.parse(e.newValue).teamId) } catch {} } }
+    window.addEventListener('bootcamp-team-buzz', onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => { window.removeEventListener('bootcamp-team-buzz', onCustom); window.removeEventListener('storage', onStorage) }
+  }, [buzzed, result, teams])
+
   const buzz = id => {
     if (buzzed !== null) return
     setBuzzed(id)
@@ -678,6 +839,15 @@ function QcmRound({ question, teams, addScore, next, seconds, basePoints, finalM
     return () => window.removeEventListener('keydown', onKey)
   }, [buzzed, result, teams])
 
+  useEffect(() => {
+    const take = id => { id = Number(id); if (!result && buzzed === null && teams.some(t => t.id === id)) claim(id) }
+    const onCustom = e => take(e.detail?.teamId)
+    const onStorage = e => { if (e.key === BUZZ_KEY && e.newValue) { try { take(JSON.parse(e.newValue).teamId) } catch {} } }
+    window.addEventListener('bootcamp-team-buzz', onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => { window.removeEventListener('bootcamp-team-buzz', onCustom); window.removeEventListener('storage', onStorage) }
+  }, [buzzed, result, teams])
+
   const claim = id => {
     if (result || buzzed !== null) return
     setBuzzed(id)
@@ -744,6 +914,15 @@ function LiveCodeRound({ challenge, teams, addScore, next, finalMode }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
+
+  useEffect(() => {
+    const take = id => { id = Number(id); if (buzzed === null && !awarded && teams.some(t => t.id === id)) claim(id) }
+    const onCustom = e => take(e.detail?.teamId)
+    const onStorage = e => { if (e.key === BUZZ_KEY && e.newValue) { try { take(JSON.parse(e.newValue).teamId) } catch {} } }
+    window.addEventListener('bootcamp-team-buzz', onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => { window.removeEventListener('bootcamp-team-buzz', onCustom); window.removeEventListener('storage', onStorage) }
+  }, [buzzed, awarded, teams])
 
   const claim = id => {
     if (buzzed !== null || awarded) return
