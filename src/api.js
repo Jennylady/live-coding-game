@@ -1,8 +1,8 @@
 import { io } from 'socket.io-client'
 
-export const ADMIN_TOKEN_KEY = 'bootcamp-champion-admin-token-v12'
-export const TEAM_TOKEN_KEY = 'bootcamp-champion-team-token-v12'
-export const TEAM_ID_KEY = 'bootcamp-champion-team-id-v12'
+export const ADMIN_TOKEN_KEY = 'bootcamp-champion-admin-token-v13'
+export const TEAM_TOKEN_KEY = 'bootcamp-champion-team-token-v13'
+export const TEAM_ID_KEY = 'bootcamp-champion-team-id-v13'
 
 export async function api(path, { method = 'GET', body, token } = {}) {
   const response = await fetch(path, {
@@ -39,6 +39,7 @@ export async function downloadAdminBackup(token) {
   a.href = url
   a.download = 'bootcamp-champion-backup.json'
   document.body.appendChild(a)
+  
   a.click()
   a.remove()
   URL.revokeObjectURL(url)

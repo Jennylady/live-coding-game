@@ -138,15 +138,20 @@ export default function App() {
       } catch {}
 
       const adminToken = sessionStorage.getItem(ADMIN_TOKEN_KEY)
-      const storedTeamId = Number(sessionStorage.getItem(TEAM_ID_KEY))
+      const storedTeamIdRaw = sessionStorage.getItem(TEAM_ID_KEY)
+      const storedTeamId = storedTeamIdRaw === null ? null : Number(storedTeamIdRaw)
+
       if (adminToken) {
         try {
           const me = await api('/api/auth/me', { token: adminToken })
-          if (!cancelled && me.role === 'admin') setAdminAuthenticated(true)
+          if (!cancelled && me.role === 'admin') {
+            setAdminAuthenticated(true)
+            setTeamSessionId(null)
+          }
         } catch {
           sessionStorage.removeItem(ADMIN_TOKEN_KEY)
         }
-      } else if ([0, 1, 2].includes(storedTeamId)) {
+      } else if (storedTeamIdRaw !== null && [0, 1, 2].includes(storedTeamId)) {
         if (!cancelled) setTeamSessionId(storedTeamId)
       }
     }
@@ -468,7 +473,9 @@ function TeamPortal({ team, screen, stage, activeMode, index, isActive, logoutTe
       <section className="team-portal glass">
         <div className="team-portal-top">
           <div className="brand"><div className="brand-icon"><Network size={19}/></div><div><strong>BOOTCAMP</strong><span>CHAMPION</span></div></div>
-          <button className="tiny-btn" onClick={logoutTeam}><LogOut size={14}/> Quitter</button>
+          <div className="team-portal-top-actions">
+            <button className="tiny-btn" onClick={logoutTeam}><LogOut size={14}/> Quitter</button>
+          </div>
         </div>
         <div className={`team-portal-orb team-${team.id}`}><Users size={31}/></div>
         <span className="summary-label">ESPACE ÉQUIPE</span>
@@ -651,12 +658,12 @@ function Registration({ teams, startCompetition, adminAuthenticated, loginAdmin,
           {!adminAuthenticated && <button className="secondary-btn admin-entry-btn" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={16}/> Connexion admin</button>}
         </div>
         {adminAuthenticated && <div className="admin-ready-panel">
-          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>admin · prêt à lancer le challenge</small></span></div>
+          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>admin · connexion validée · cliquez sur Lancer les qualifications</small></span></div>
           <button className="primary-btn launch-competition" onClick={launch} disabled={!isReady}><Play size={17}/> Lancer les qualifications</button>
         </div>}
         {!adminAuthenticated && <button className="primary-btn wide launch-competition" onClick={launch}><LogIn size={17}/> Connexion admin puis lancement</button>}
         {showTeamLogin && <TeamLoginModal loginTeam={loginTeam} teams={teams} onClose={() => setShowTeamLogin(false)}/>}
-        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={async () => { setShowAdminLogin(false); await startCompetition() }} canLaunch={true}/>} 
+        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={() => setShowAdminLogin(false)} canLaunch={false}/>} 
       </section>
     </main>
   )
