@@ -1,20 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Activity, Award, Bolt, BrainCircuit, ChevronRight, CircleHelp, Clock3,
-  Cpu, Gauge, Medal, Network, Play, RotateCcw, ShieldCheck, Swords,
-  TerminalSquare, Trophy, Users, Wifi
+  Activity, Award, Binary, BrainCircuit, Check, ChevronRight, CircleHelp,
+  Clock3, Code2, Crown, Gauge, Medal, Network, Pause, Play, RotateCcw,
+  Settings2, ShieldCheck, Sparkles, Swords, TerminalSquare, Trophy, Users,
+  UserPlus, Trash2, X, Zap
 } from 'lucide-react'
-import { championQuestions, sprintQuestions, finalQuestions } from './data/questions'
+import {
+  quizQuestions,
+  championQuestions,
+  bashChallenges,
+  pythonChallenges,
+  finalQuizQuestions,
+  finalChampionQuestions,
+  finalBashChallenges,
+  finalPythonChallenges
+} from './data/questions'
 
-const normalize = (value) => value
+const KEYS = ['a', 'g', 'l']
+const KEY_LABELS = ['A', 'G', 'L']
+
+const emptyTeams = () => [
+  { id: 0, name: '', members: [], score: 0, registered: false },
+  { id: 1, name: '', members: [], score: 0, registered: false },
+  { id: 2, name: '', members: [], score: 0, registered: false },
+]
+
+const normalize = (value = '') => value
   .toLowerCase()
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-z0-9 ]/g, ' ')
+  .replace(/[^a-z0-9. ]/g, ' ')
   .replace(/\s+/g, ' ')
   .trim()
-
-const shuffled = (items) => [...items].sort(() => Math.random() - 0.5)
 
 function beep(freq = 520, duration = 0.09) {
   try {
@@ -23,7 +40,7 @@ function beep(freq = 520, duration = 0.09) {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.frequency.value = freq
-    gain.gain.setValueAtTime(0.05, ctx.currentTime)
+    gain.gain.setValueAtTime(0.045, ctx.currentTime)
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
     osc.connect(gain)
     gain.connect(ctx.destination)
@@ -32,24 +49,93 @@ function beep(freq = 520, duration = 0.09) {
   } catch {}
 }
 
-const MODES = [
-  { id: 'champion', title: 'Qui suis-je ?', subtitle: 'Indices progressifs + buzzer', icon: BrainCircuit, tone: 'violet' },
-  { id: 'sprint', title: 'Sprint réseau', subtitle: 'QCM chronométré', icon: Bolt, tone: 'cyan' },
-  { id: 'final', title: 'Finale technique', subtitle: 'Scénarios & subnetting', icon: Trophy, tone: 'amber' },
+const QUAL_MODES = [
+  { id: 'quiz', title: 'Quiz · Choix multiple', subtitle: '12 questions · 25 s/question · buzzer', meta: 'ÉPREUVE 01', icon: Binary, tone: 'cyan' },
+  { id: 'champion', title: 'Question pour un champion', subtitle: '12 questions · 4 indices · 7 s/indice', meta: 'ÉPREUVE 02', icon: BrainCircuit, tone: 'violet' },
+  { id: 'bash', title: 'Live Code · Bash', subtitle: '3 exercices pratiques · 4 à 6 min', meta: 'ÉPREUVE 03', icon: TerminalSquare, tone: 'amber' },
+  { id: 'python', title: 'Live Code · Python système', subtitle: '3 exercices pratiques · 4 à 5 min', meta: 'ÉPREUVE 04', icon: Code2, tone: 'amber' },
+]
+
+const FINAL_MODES = [
+  { id: 'finalQuiz', title: 'Quiz final', subtitle: '6 questions · 35 s/question · buzzer', meta: 'FINALE 01', icon: Swords, tone: 'cyan' },
+  { id: 'finalChampion', title: 'Champion final', subtitle: '4 questions · indices progressifs', meta: 'FINALE 02', icon: BrainCircuit, tone: 'violet' },
+  { id: 'finalBash', title: 'Live Code · Bash final', subtitle: '2 exercices · points manuels', meta: 'FINALE 03', icon: TerminalSquare, tone: 'amber' },
+  { id: 'finalPython', title: 'Live Code · Python final', subtitle: '2 exercices · points manuels', meta: 'FINALE 04', icon: Code2, tone: 'amber' },
 ]
 
 export default function App() {
-  const [screen, setScreen] = useState('home')
-  const [teamNames, setTeamNames] = useState(['Équipe Alpha', 'Équipe Beta'])
-  const [scores, setScores] = useState([0, 0])
+  const [screen, setScreen] = useState('registration')
+  const [stage, setStage] = useState('qualification')
+  const [teams, setTeams] = useState(emptyTeams)
+  const [qualificationSnapshot, setQualificationSnapshot] = useState([])
+  const [finalists, setFinalists] = useState([])
   const [activeMode, setActiveMode] = useState(null)
   const [questionSet, setQuestionSet] = useState([])
   const [index, setIndex] = useState(0)
   const [roundDone, setRoundDone] = useState(false)
 
+  useEffect(() => {
+    const saved = localStorage.getItem('bootcamp-champion-state-v4')
+    if (!saved) return
+    try {
+      const state = JSON.parse(saved)
+      if (state?.teams?.length === 3) setTeams(state.teams)
+      if (Array.isArray(state?.finalists)) setFinalists(state.finalists)
+      if (Array.isArray(state?.qualificationSnapshot)) setQualificationSnapshot(state.qualificationSnapshot)
+      if (['registration', 'lobby', 'finalists', 'winner'].includes(state?.screen)) setScreen(state.screen)
+      if (['qualification', 'final'].includes(state?.stage)) setStage(state.stage)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (screen === 'game') return
+    localStorage.setItem('bootcamp-champion-state-v4', JSON.stringify({ teams, finalists, qualificationSnapshot, screen, stage }))
+  }, [teams, finalists, qualificationSnapshot, screen, stage])
+
+  const activeTeamIds = stage === 'final' ? finalists : teams.map(t => t.id)
+  const visibleTeams = teams.filter(t => activeTeamIds.includes(t.id))
+
+  const registerTeam = ({ name, members }) => {
+    const cleanName = name.trim()
+    const cleanMembers = members.map(member => member.trim()).filter(Boolean)
+    if (!cleanName) return { ok: false, message: "Entrez le nom de l'équipe." }
+    if (!cleanMembers.length) return { ok: false, message: 'Ajoutez au moins un membre.' }
+    if (teams.some(team => team.registered && normalize(team.name) === normalize(cleanName))) {
+      return { ok: false, message: 'Ce nom d’équipe est déjà inscrit.' }
+    }
+    const slot = teams.find(team => !team.registered)
+    if (!slot) return { ok: false, message: 'Les 3 places sont déjà occupées.' }
+    setTeams(list => list.map(team => team.id === slot.id ? { ...team, name: cleanName, members: cleanMembers, registered: true, score: 0 } : team))
+    return { ok: true, teamId: slot.id }
+  }
+
+  const unregisterTeam = (id) => {
+    setTeams(list => list.map(team => team.id === id ? { id: team.id, name: '', members: [], score: 0, registered: false } : team))
+  }
+
+  const addScore = (id, points) => setTeams(list => list.map(team => team.id === id ? { ...team, score: Math.max(0, team.score + Number(points || 0)) } : team))
+
+  const startCompetition = () => {
+    if (teams.filter(team => team.registered).length !== 3) return
+    setTeams(list => list.map(team => ({ ...team, score: 0 })))
+    setFinalists([])
+    setQualificationSnapshot([])
+    setStage('qualification')
+    setScreen('lobby')
+  }
+
   const startMode = (mode) => {
-    let set = mode === 'champion' ? championQuestions : mode === 'sprint' ? sprintQuestions : finalQuestions
-    setQuestionSet(shuffled(set))
+    let set = []
+    if (mode === 'quiz') set = quizQuestions
+    if (mode === 'champion') set = championQuestions
+    if (mode === 'bash') set = bashChallenges
+    if (mode === 'python') set = pythonChallenges
+    if (mode === 'finalQuiz') set = finalQuizQuestions
+    if (mode === 'finalChampion') set = finalChampionQuestions
+    if (mode === 'finalBash') set = finalBashChallenges
+    if (mode === 'finalPython') set = finalPythonChallenges
+    // Ordre pédagogique conservé : du plus accessible au plus technique.
+    setQuestionSet([...set])
     setIndex(0)
     setRoundDone(false)
     setActiveMode(mode)
@@ -58,89 +144,221 @@ export default function App() {
 
   const next = () => {
     if (index + 1 >= questionSet.length) setRoundDone(true)
-    else setIndex(v => v + 1)
+    else setIndex(i => i + 1)
   }
 
-  const resetGame = () => {
-    setScores([0, 0])
-    setScreen('home')
+  const returnToLobby = () => {
+    setRoundDone(false)
+    setScreen('lobby')
+  }
+
+  const closeQualifications = () => {
+    const ordered = [...teams].sort((a, b) => b.score - a.score)
+    setQualificationSnapshot(ordered.map(t => ({ ...t })))
+    setFinalists([ordered[0].id, ordered[1].id])
+    setScreen('finalists')
+  }
+
+  const confirmFinalists = () => {
+    if (finalists.length !== 2) return
+    setTeams(list => list.map(team => ({ ...team, score: finalists.includes(team.id) ? 0 : team.score })))
+    setStage('final')
+    setScreen('lobby')
+  }
+
+  const resetAll = () => {
+    localStorage.removeItem('bootcamp-champion-state-v4')
+    setTeams(emptyTeams())
+    setFinalists([])
+    setQualificationSnapshot([])
+    setStage('qualification')
+    setScreen('registration')
     setActiveMode(null)
+    setQuestionSet([])
     setIndex(0)
     setRoundDone(false)
   }
 
-  const addScore = (team, points) => setScores(s => s.map((v, i) => i === team ? Math.max(0, v + points) : v))
-
   return (
     <div className="app-shell">
-      <BackgroundGrid />
-      <header className="topbar">
-        <div className="brand" onClick={() => setScreen('home')}>
-          <div className="brand-icon"><Network size={20}/></div>
-          <div><strong>NETWORK</strong><span>CHAMPION</span></div>
-        </div>
-        <div className="status-chip"><span className="live-dot"/> Atelier Réseaux</div>
-      </header>
+      <Background />
+      <Header stage={stage} screen={screen} resetAll={resetAll} />
 
-      {screen === 'home' ? (
-        <Home teamNames={teamNames} setTeamNames={setTeamNames} scores={scores} startMode={startMode} />
-      ) : (
+      {screen === 'registration' && (
+        <Registration teams={teams} registerTeam={registerTeam} unregisterTeam={unregisterTeam} startCompetition={startCompetition} />
+      )}
+
+      {screen === 'lobby' && (
+        <Lobby
+          stage={stage}
+          teams={visibleTeams}
+          modes={stage === 'qualification' ? QUAL_MODES : FINAL_MODES}
+          startMode={startMode}
+          closeQualifications={closeQualifications}
+          finishFinal={() => setScreen('winner')}
+          qualificationSnapshot={qualificationSnapshot}
+        />
+      )}
+
+      {screen === 'finalists' && (
+        <FinalistSelection
+          teams={teams}
+          finalists={finalists}
+          setFinalists={setFinalists}
+          confirm={confirmFinalists}
+          back={() => setScreen('lobby')}
+        />
+      )}
+
+      {screen === 'game' && (
         <GameShell
           mode={activeMode}
           question={questionSet[index]}
           index={index}
           total={questionSet.length}
-          teamNames={teamNames}
-          scores={scores}
+          teams={visibleTeams}
           addScore={addScore}
           next={next}
           roundDone={roundDone}
-          resetGame={resetGame}
-          goHome={() => setScreen('home')}
+          returnToLobby={returnToLobby}
         />
+      )}
+
+      {screen === 'winner' && (
+        <WinnerScreen teams={visibleTeams} qualificationSnapshot={qualificationSnapshot} resetAll={resetAll} />
       )}
     </div>
   )
 }
 
-function BackgroundGrid() {
+function Background() {
   return <><div className="grid-bg"/><div className="glow glow-a"/><div className="glow glow-b"/></>
 }
 
-function Home({ teamNames, setTeamNames, scores, startMode }) {
+function Header({ stage, screen, resetAll }) {
   return (
-    <main className="home-page">
-      <section className="hero-copy">
-        <div className="eyebrow"><Activity size={14}/> MODE ATELIER INTERACTIF</div>
-        <h1>LE RÉSEAU,<br/><span>MAIS EN MODE CHAMPION.</span></h1>
-        <p>Un challenge en équipes pour réviser le cours autrement : logique réseau, diagnostic, commandes, services, switching, routage et subnetting.</p>
+    <header className="topbar">
+      <div className="brand">
+        <div className="brand-icon"><Network size={19}/></div>
+        <div><strong>BOOTCAMP</strong><span>CHAMPION</span></div>
+      </div>
+      <div className="header-actions">
+        {screen !== 'registration' && <div className="status-chip"><span className="live-dot"/>{stage === 'qualification' ? 'Qualifications · 3 équipes' : 'Finale · 2 équipes'}</div>}
+        {screen !== 'registration' && <button className="tiny-btn" onClick={resetAll}><RotateCcw size={14}/> Reset</button>}
+      </div>
+    </header>
+  )
+}
+
+function Registration({ teams, registerTeam, unregisterTeam, startCompetition }) {
+  const [teamName, setTeamName] = useState('')
+  const [membersText, setMembersText] = useState('')
+  const [message, setMessage] = useState('')
+  const registered = teams.filter(team => team.registered)
+  const isFull = registered.length === 3
+
+  const submit = (event) => {
+    event.preventDefault()
+    const members = membersText.split(/[,;\n]/).map(member => member.trim()).filter(Boolean)
+    const result = registerTeam({ name: teamName, members })
+    if (!result.ok) {
+      setMessage(result.message)
+      return
+    }
+    setTeamName('')
+    setMembersText('')
+    setMessage(`Équipe inscrite. Buzzer attribué : ${KEY_LABELS[result.teamId]}.`)
+  }
+
+  const remove = (id) => {
+    unregisterTeam(id)
+    setMessage('Place libérée. Une nouvelle équipe peut maintenant s’inscrire.')
+  }
+
+  return (
+    <main className="registration-page registration-self-service">
+      <section className="hero-copy registration-hero">
+        <div className="eyebrow"><Activity size={14}/> INSCRIPTIONS OUVERTES</div>
+        <h1>3 ÉQUIPES.<br/><span>2 PLACES EN FINALE.</span></h1>
+        <p>Chaque équipe s’inscrit elle-même avant le début du challenge. Dès que les trois places sont prises, l’animateur peut lancer les qualifications.</p>
+        <div className="registration-progress">
+          <div className="registration-progress-copy"><span>Équipes inscrites</span><strong>{registered.length}/3</strong></div>
+          <div className="registration-progress-bar"><i style={{ width: `${(registered.length / 3) * 100}%` }}/></div>
+        </div>
       </section>
 
-      <section className="setup-panel glass">
+      <section className="registration-card glass">
         <div className="panel-heading">
-          <div><span>01</span><h2>Équipes</h2></div>
-          <Users size={22}/>
+          <div><span>01</span><h2>Inscrire mon équipe</h2></div>
+          <UserPlus size={23}/>
         </div>
-        <div className="teams-grid">
-          {[0,1].map(i => (
-            <label className="team-field" key={i}>
-              <span>Équipe {i + 1}</span>
-              <input value={teamNames[i]} onChange={e => setTeamNames(names => names.map((n, idx) => idx === i ? e.target.value : n))}/>
-              <b>{scores[i]} pts</b>
+
+        {!isFull ? (
+          <form className="self-register-form" onSubmit={submit}>
+            <label>
+              <small>Nom de l’équipe</small>
+              <input value={teamName} onChange={e => setTeamName(e.target.value)} placeholder="Ex. Root Force" maxLength={32}/>
             </label>
+            <label>
+              <small>Membres de l’équipe</small>
+              <textarea value={membersText} onChange={e => setMembersText(e.target.value)} placeholder="Alice, Bob, Charlie" rows={3}/>
+              <em>Séparez les prénoms par des virgules.</em>
+            </label>
+            <button className="primary-btn wide" type="submit">Inscrire mon équipe <ChevronRight size={18}/></button>
+          </form>
+        ) : (
+          <div className="registration-complete">
+            <div className="registration-complete-icon"><Check size={22}/></div>
+            <div><strong>Inscriptions complètes</strong><span>Les trois équipes sont enregistrées. Les qualifications peuvent commencer.</span></div>
+          </div>
+        )}
+
+        {message && <div className="registration-message">{message}</div>}
+
+        <div className="registered-teams">
+          {teams.map((team, i) => (
+            <div className={`registered-team ${team.registered ? 'filled' : 'empty'}`} key={team.id}>
+              <div className={`team-avatar team-${i}`}><span>{i + 1}</span></div>
+              <div className="registered-team-copy">
+                <small>Place {i + 1} · buzzer {KEY_LABELS[i]}</small>
+                {team.registered ? <><strong>{team.name}</strong><span>{team.members.join(' · ')}</span></> : <><strong>Place disponible</strong><span>En attente d’une équipe</span></>}
+              </div>
+              {team.registered ? <button className="remove-team" type="button" onClick={() => remove(team.id)} title="Annuler cette inscription"><Trash2 size={15}/></button> : <kbd>{KEY_LABELS[i]}</kbd>}
+            </div>
           ))}
         </div>
+
+        <div className="registration-note"><ShieldCheck size={17}/><span>Une fois les 3 équipes inscrites, l’animateur lance la compétition. Les touches A, G et L restent leurs buzzers pendant les manches.</span></div>
+        <button className="primary-btn wide launch-competition" onClick={startCompetition} disabled={!isFull}>Lancer les qualifications <ChevronRight size={18}/></button>
+      </section>
+    </main>
+  )
+}
+
+function Lobby({ stage, teams, modes, startMode, closeQualifications, finishFinal, qualificationSnapshot }) {
+  const ordered = [...teams].sort((a, b) => b.score - a.score)
+  return (
+    <main className="lobby-page">
+      <section className="lobby-heading">
+        <div>
+          <div className="eyebrow"><Sparkles size={14}/>{stage === 'qualification' ? 'PHASE 1' : 'PHASE 2'}</div>
+          <h1>{stage === 'qualification' ? 'QUALIFICATIONS' : 'GRANDE FINALE'}</h1>
+          <p>{stage === 'qualification' ? 'Les trois équipes accumulent des points. Quand vous le décidez, vous qualifiez exactement deux équipes.' : 'Les scores ont été remis à zéro pour le duel final.'}</p>
+        </div>
+        <div className="phase-badge">{stage === 'qualification' ? '3 → 2' : '2 → 1'}</div>
       </section>
 
-      <section className="mode-section">
-        <div className="section-title"><div><span>02</span><h2>Choisissez une manche</h2></div><p>3 formats · difficulté progressive</p></div>
-        <div className="mode-grid">
-          {MODES.map((mode, idx) => {
+      <Scoreboard teams={teams} compact={false}/>
+
+      <section className="mode-section glass">
+        <div className="section-title"><div><span>02</span><h2>Épreuves dans l’ordre</h2></div><p>{stage === 'qualification' ? 'Quiz → Champion → Live Bash → Live Python' : 'Quiz final → Champion final → Bash → Python'}</p></div>
+        <div className={`mode-grid ${modes.length === 2 ? 'two' : ''}`}>
+          {modes.map((mode, idx) => {
             const Icon = mode.icon
             return (
               <button className={`mode-card ${mode.tone}`} key={mode.id} onClick={() => startMode(mode.id)}>
-                <div className="mode-number">0{idx + 1}</div>
-                <div className="mode-icon"><Icon size={26}/></div>
+                <div className="mode-number">{mode.meta || `0${idx + 1}`}</div>
+                <div className="mode-icon"><Icon size={27}/></div>
                 <div className="mode-copy"><h3>{mode.title}</h3><p>{mode.subtitle}</p></div>
                 <ChevronRight className="mode-arrow" size={22}/>
               </button>
@@ -149,47 +367,98 @@ function Home({ teamNames, setTeamNames, scores, startMode }) {
         </div>
       </section>
 
-      <section className="rules-strip">
-        <div><KeyboardKey text="A"/><span>buzzer équipe 1</span></div>
-        <div><KeyboardKey text="L"/><span>buzzer équipe 2</span></div>
-        <div><Clock3 size={18}/><span>chronos automatiques</span></div>
-        <div><ShieldCheck size={18}/><span>correction immédiate</span></div>
+      <section className="lobby-footer glass">
+        <div className="leader-mini">
+          <span>{stage === 'qualification' ? 'Classement actuel' : 'Duel actuel'}</span>
+          <strong>{ordered.map((t, i) => `${i + 1}. ${t.name} · ${t.score} pts`).join('  /  ')}</strong>
+        </div>
+        {stage === 'qualification' ? (
+          <button className="primary-btn amber-btn" onClick={closeQualifications}><Crown size={18}/> Clôturer et choisir les 2 finalistes</button>
+        ) : (
+          <button className="primary-btn amber-btn" onClick={finishFinal}><Trophy size={18}/> Terminer la finale</button>
+        )}
+      </section>
+
+      {stage === 'final' && qualificationSnapshot.length > 0 && (
+        <div className="qualification-memory">Qualifications : {qualificationSnapshot.map((t, i) => `${i + 1}. ${t.name} (${t.score})`).join(' · ')}</div>
+      )}
+    </main>
+  )
+}
+
+function Scoreboard({ teams, compact = true }) {
+  const ordered = [...teams].sort((a, b) => b.score - a.score)
+  return (
+    <section className={`scoreboard glass ${compact ? 'compact' : ''}`}>
+      {teams.map((team) => {
+        const rank = ordered.findIndex(t => t.id === team.id) + 1
+        return (
+          <div className="score-team" key={team.id}>
+            <div className={`team-orb team-${team.id}`}>{rank === 1 ? <Crown size={20}/> : <span>{rank}</span>}</div>
+            <div className="score-copy"><span>{team.name}</span><strong>{team.score}</strong></div>
+            <small>PTS</small>
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+function FinalistSelection({ teams, finalists, setFinalists, confirm, back }) {
+  const ordered = [...teams].sort((a, b) => b.score - a.score)
+  const toggle = id => {
+    setFinalists(current => {
+      if (current.includes(id)) return current.filter(x => x !== id)
+      if (current.length >= 2) return current
+      return [...current, id]
+    })
+  }
+  return (
+    <main className="selection-page">
+      <section className="selection-card glass">
+        <div className="selection-icon"><Crown size={36}/></div>
+        <span className="summary-label">FIN DES QUALIFICATIONS</span>
+        <h1>CHOISISSEZ LES 2 FINALISTES</h1>
+        <p>Les deux meilleurs sont pré-sélectionnés automatiquement, mais l’animateur peut modifier ce choix en cas d’égalité ou selon le règlement.</p>
+        <div className="finalist-list">
+          {ordered.map((team, i) => (
+            <button key={team.id} className={finalists.includes(team.id) ? 'selected' : ''} onClick={() => toggle(team.id)}>
+              <div className="rank-pill">#{i + 1}</div>
+              <div><strong>{team.name}</strong><span>{team.score} points</span></div>
+              <div className="select-mark">{finalists.includes(team.id) ? <Check size={18}/> : <span/>}</div>
+            </button>
+          ))}
+        </div>
+        <div className="selection-actions">
+          <button className="secondary-btn" onClick={back}>Retour</button>
+          <button className="primary-btn" disabled={finalists.length !== 2} onClick={confirm}>Démarrer la finale <ChevronRight size={18}/></button>
+        </div>
+        <div className="reset-score-note"><RotateCcw size={15}/> Les deux finalistes repartent à 0 point en finale. Le classement des qualifications reste mémorisé.</div>
       </section>
     </main>
   )
 }
 
-function KeyboardKey({ text }) { return <kbd>{text}</kbd> }
-
-function GameShell(props) {
-  if (props.roundDone) return <RoundSummary {...props}/>
+function GameShell({ mode, question, index, total, teams, addScore, next, roundDone, returnToLobby }) {
+  if (roundDone) return <RoundSummary teams={teams} returnToLobby={returnToLobby}/>
   return (
     <main className="game-page">
       <div className="game-topline">
-        <button className="ghost-btn" onClick={props.goHome}>← Menu</button>
-        <div className="progress-wrap"><span>Question {props.index + 1}/{props.total}</span><div className="progress"><i style={{width: `${((props.index + 1) / props.total) * 100}%`}}/></div></div>
-        <div className="difficulty"><Gauge size={16}/> Atelier</div>
+        <button className="ghost-btn" onClick={returnToLobby}>← Tableau de bord</button>
+        <div className="progress-wrap"><span>Challenge {index + 1}/{total}</span><div className="progress"><i style={{ width: `${((index + 1) / total) * 100}%` }}/></div></div>
+        <div className="difficulty"><Gauge size={16}/> Bootcamp</div>
       </div>
-      <Scoreboard teamNames={props.teamNames} scores={props.scores}/>
-      {props.mode === 'champion' && <ChampionRound {...props}/>} 
-      {props.mode === 'sprint' && <QcmRound {...props} seconds={18} basePoints={20}/>} 
-      {props.mode === 'final' && <QcmRound {...props} seconds={30} basePoints={35} finalMode/>}
+      <Scoreboard teams={teams}/>
+      {(mode === 'champion' || mode === 'finalChampion') && <ChampionRound question={question} teams={teams} addScore={addScore} next={next} finalMode={mode === 'finalChampion'}/>}
+      {(mode === 'quiz' || mode === 'finalQuiz') && <QcmRound question={question} teams={teams} addScore={addScore} next={next} seconds={mode === 'finalQuiz' ? 35 : 25} basePoints={mode === 'finalQuiz' ? 40 : 25} finalMode={mode === 'finalQuiz'}/>}
+      {(['bash', 'python', 'finalBash', 'finalPython'].includes(mode)) && <LiveCodeRound challenge={question} teams={teams} addScore={addScore} next={next} finalMode={mode.startsWith('final')}/>} 
     </main>
   )
 }
 
-function Scoreboard({ teamNames, scores }) {
-  return (
-    <section className="scoreboard glass">
-      {[0,1].map(i => <div className="score-team" key={i}><div className={`team-orb t${i}`}>{i === 0 ? <Cpu/> : <Wifi/>}</div><div><span>{teamNames[i]}</span><strong>{scores[i]}</strong></div><small>PTS</small></div>)}
-      <div className="versus"><Swords size={20}/><span>VS</span></div>
-    </section>
-  )
-}
-
-function ChampionRound({ question, teamNames, addScore, next }) {
+function ChampionRound({ question, teams, addScore, next, finalMode = false }) {
   const [clueCount, setClueCount] = useState(1)
-  const [time, setTime] = useState(6)
+  const [time, setTime] = useState(7)
   const [buzzed, setBuzzed] = useState(null)
   const [answer, setAnswer] = useState('')
   const [result, setResult] = useState(null)
@@ -197,7 +466,7 @@ function ChampionRound({ question, teamNames, addScore, next }) {
   const points = [40, 30, 20, 10][Math.min(clueCount - 1, 3)]
 
   useEffect(() => {
-    setClueCount(1); setTime(6); setBuzzed(null); setAnswer(''); setResult(null)
+    setClueCount(1); setTime(7); setBuzzed(null); setAnswer(''); setResult(null)
   }, [question])
 
   useEffect(() => {
@@ -206,7 +475,7 @@ function ChampionRound({ question, teamNames, addScore, next }) {
       setTime(t => {
         if (t <= 1) {
           if (clueCount < 4) setClueCount(c => c + 1)
-          return 6
+          return 7
         }
         return t - 1
       })
@@ -216,16 +485,19 @@ function ChampionRound({ question, teamNames, addScore, next }) {
 
   useEffect(() => {
     const onKey = e => {
-      if (result || buzzed !== null) return
-      if (e.key.toLowerCase() === 'a') buzz(0)
-      if (e.key.toLowerCase() === 'l') buzz(1)
+      if (result || buzzed !== null || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
+      const idx = KEYS.indexOf(e.key.toLowerCase())
+      const team = teams.find(t => t.id === idx)
+      if (team) buzz(team.id)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const buzz = team => {
-    setBuzzed(team); beep(team === 0 ? 540 : 720, .12)
+  const buzz = id => {
+    if (buzzed !== null) return
+    setBuzzed(id)
+    beep(540 + id * 110, .12)
     setTimeout(() => inputRef.current?.focus(), 80)
   }
 
@@ -233,30 +505,31 @@ function ChampionRound({ question, teamNames, addScore, next }) {
     e.preventDefault()
     const ok = question.accepted.some(a => normalize(a) === normalize(answer))
     setResult(ok ? 'correct' : 'wrong')
-    beep(ok ? 860 : 180, .18)
     addScore(buzzed, ok ? points : -10)
+    beep(ok ? 860 : 180, .18)
   }
+
+  const buzzedTeam = teams.find(t => t.id === buzzed)
 
   return (
     <section className="challenge-card glass champion-card">
       <div className="challenge-meta"><span className="category"><CircleHelp size={15}/>{question.category}</span><span className="points">{points} points en jeu</span></div>
-      <div className="champion-title"><span>QUI SUIS-JE ?</span><h2>Identifiez l’élément réseau</h2></div>
+      <div className="champion-title"><span>{finalMode ? 'QUESTION POUR UN CHAMPION · FINALE' : 'QUESTION POUR UN CHAMPION'}</span><h2>Qui suis-je ?</h2><small>{question.level}</small></div>
       <div className="clues">
-        {question.clues.slice(0, clueCount).map((clue, i) => <div className="clue" key={i}><b>0{i+1}</b><p>{clue}</p></div>)}
-        {question.clues.slice(clueCount).map((_, i) => <div className="clue locked" key={`l${i}`}><b>0{clueCount+i+1}</b><p>Indice verrouillé</p></div>)}
+        {question.clues.slice(0, clueCount).map((clue, i) => <div className="clue" key={i}><b>0{i + 1}</b><p>{clue}</p></div>)}
+        {question.clues.slice(clueCount).map((_, i) => <div className="clue locked" key={`l${i}`}><b>0{clueCount + i + 1}</b><p>Indice verrouillé</p></div>)}
       </div>
 
       {!result && buzzed === null && <div className="buzzer-zone">
         <div className="countdown"><Clock3 size={20}/><strong>{time}s</strong><span>avant l’indice suivant</span></div>
-        <div className="buzz-buttons">
-          <button onClick={() => buzz(0)}><kbd>A</kbd><span>{teamNames[0]}</span><b>BUZZ</b></button>
-          <button onClick={() => buzz(1)}><kbd>L</kbd><span>{teamNames[1]}</span><b>BUZZ</b></button>
+        <div className={`buzz-buttons cols-${teams.length}`}>
+          {teams.map(team => <button key={team.id} onClick={() => buzz(team.id)}><kbd>{KEY_LABELS[team.id]}</kbd><span>{team.name}</span><b>BUZZ</b></button>)}
         </div>
       </div>}
 
       {!result && buzzed !== null && <form className="answer-panel" onSubmit={validate}>
-        <div><span>Buzzer</span><strong>{teamNames[buzzed]}</strong></div>
-        <input ref={inputRef} placeholder="Votre réponse…" value={answer} onChange={e => setAnswer(e.target.value)}/>
+        <div><span>Équipe au buzzer</span><strong>{buzzedTeam?.name}</strong></div>
+        <input ref={inputRef} placeholder="Réponse de l’équipe…" value={answer} onChange={e => setAnswer(e.target.value)}/>
         <button type="submit" disabled={!answer.trim()}>Valider</button>
       </form>}
 
@@ -265,13 +538,13 @@ function ChampionRound({ question, teamNames, addScore, next }) {
   )
 }
 
-function QcmRound({ question, teamNames, addScore, next, seconds, basePoints, finalMode }) {
+function QcmRound({ question, teams, addScore, next, seconds, basePoints, finalMode }) {
   const [time, setTime] = useState(seconds)
-  const [team, setTeam] = useState(null)
+  const [buzzed, setBuzzed] = useState(null)
   const [selected, setSelected] = useState(null)
   const [result, setResult] = useState(null)
 
-  useEffect(() => { setTime(seconds); setTeam(null); setSelected(null); setResult(null) }, [question, seconds])
+  useEffect(() => { setTime(seconds); setBuzzed(null); setSelected(null); setResult(null) }, [question, seconds])
 
   useEffect(() => {
     if (result) return
@@ -282,32 +555,154 @@ function QcmRound({ question, teamNames, addScore, next, seconds, basePoints, fi
     return () => clearInterval(timer)
   }, [result])
 
-  const choose = idx => { if (!result) setSelected(idx) }
+  useEffect(() => {
+    const onKey = e => {
+      if (result || buzzed !== null || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
+      const id = KEYS.indexOf(e.key.toLowerCase())
+      if (teams.some(t => t.id === id)) { setBuzzed(id); beep(560 + id * 110, .12) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [buzzed, result, teams])
+
+  const claim = id => {
+    if (result || buzzed !== null) return
+    setBuzzed(id)
+    beep(560 + id * 110, .12)
+  }
+
   const validate = () => {
-    if (selected === null || team === null) return
+    if (selected === null || buzzed === null) return
     const ok = selected === question.correct
     setResult(ok ? 'correct' : 'wrong')
-    addScore(team, ok ? basePoints + Math.ceil(time/3) : -5)
+    addScore(buzzed, ok ? basePoints + Math.ceil(time / 4) : -5)
     beep(ok ? 850 : 200, .15)
   }
 
+  const buzzedTeam = teams.find(t => t.id === buzzed)
+
   return (
     <section className={`challenge-card glass qcm-card ${finalMode ? 'final-card' : ''}`}>
-      <div className="challenge-meta"><span className="category"><TerminalSquare size={15}/>{question.category}</span><span className="timer-pill"><Clock3 size={15}/>{time}s</span></div>
-      <div className="qcm-head"><span>{finalMode ? 'FINALE TECHNIQUE' : 'SPRINT RÉSEAU'}</span><h2>{question.question}</h2></div>
+      <div className="challenge-meta"><span className="category"><Binary size={15}/>{question.category}</span><span className="timer-pill"><Clock3 size={15}/>{time}s</span></div>
+      <div className="qcm-head"><span>{finalMode ? 'QUIZ FINAL' : 'QUIZ · CHOIX MULTIPLE'}</span><h2>{question.question}</h2><small>{question.level}</small></div>
+      {buzzed === null && !result && <div className="qcm-buzz-first"><span>BUZZ AVANT DE RÉPONDRE</span><div className={`buzz-buttons cols-${teams.length}`}>{teams.map(team => <button key={team.id} onClick={() => claim(team.id)}><kbd>{KEY_LABELS[team.id]}</kbd><span>{team.name}</span><b>BUZZ</b></button>)}</div></div>}
+      {buzzed !== null && !result && <div className="qcm-lockline"><Zap size={16}/><span>{buzzedTeam?.name} a le buzzer — choisissez une réponse</span></div>}
       <div className="qcm-options">
         {question.options.map((opt, i) => (
-          <button className={`${selected === i ? 'selected' : ''} ${result && i === question.correct ? 'is-correct' : ''} ${result && selected === i && i !== question.correct ? 'is-wrong' : ''}`} key={opt} onClick={() => choose(i)} disabled={!!result}>
-            <b>{String.fromCharCode(65+i)}</b><span>{opt}</span>
+          <button className={`${selected === i ? 'selected' : ''} ${result && i === question.correct ? 'is-correct' : ''} ${result && selected === i && i !== question.correct ? 'is-wrong' : ''}`} key={opt} onClick={() => !result && buzzed !== null && setSelected(i)} disabled={!!result || buzzed === null}>
+            <b>{String.fromCharCode(65 + i)}</b><span>{opt}</span>
           </button>
         ))}
       </div>
-      {!result && <div className="qcm-actionbar">
-        <div className="team-selector"><span>Qui répond ?</span>{teamNames.map((name, i) => <button className={team === i ? 'active' : ''} key={name} onClick={() => setTeam(i)}>{name}</button>)}</div>
-        <button className="primary-btn" disabled={selected === null || team === null} onClick={validate}>Valider la réponse <ChevronRight size={18}/></button>
+      {!result && buzzed !== null && <div className="qcm-actionbar">
+        <div className="team-selector"><span>Réponse de</span><strong>{buzzedTeam?.name}</strong></div>
+        <button className="primary-btn" disabled={selected === null} onClick={validate}>Valider <ChevronRight size={18}/></button>
       </div>}
       {result === 'timeout' && <Feedback result="wrong" answer={question.options[question.correct]} explanation={`Temps écoulé. ${question.explanation}`} onNext={next}/>} 
       {(result === 'correct' || result === 'wrong') && <Feedback result={result} answer={question.options[question.correct]} explanation={question.explanation} onNext={next}/>} 
+    </section>
+  )
+}
+
+function LiveCodeRound({ challenge, teams, addScore, next, finalMode }) {
+  const [buzzed, setBuzzed] = useState(null)
+  const [showRubric, setShowRubric] = useState(false)
+  const [custom, setCustom] = useState('')
+  const [awarded, setAwarded] = useState(false)
+  const [remaining, setRemaining] = useState(challenge.time)
+  const [running, setRunning] = useState(false)
+
+  useEffect(() => {
+    setBuzzed(null); setShowRubric(false); setCustom(''); setAwarded(false); setRemaining(challenge.time); setRunning(true)
+  }, [challenge])
+
+  useEffect(() => {
+    if (!running || remaining <= 0 || awarded) return
+    const timer = setInterval(() => setRemaining(v => Math.max(0, v - 1)), 1000)
+    return () => clearInterval(timer)
+  }, [running, remaining, awarded])
+
+  useEffect(() => {
+    const onKey = e => {
+      if (buzzed !== null || awarded || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
+      const id = KEYS.indexOf(e.key.toLowerCase())
+      if (teams.some(t => t.id === id)) claim(id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const claim = id => {
+    if (buzzed !== null || awarded) return
+    setBuzzed(id)
+    setRunning(false)
+    beep(620 + id * 90, .14)
+  }
+
+  const award = points => {
+    if (buzzed === null || awarded) return
+    addScore(buzzed, Number(points))
+    setAwarded(true)
+    beep(Number(points) > 0 ? 900 : 230, .16)
+  }
+
+  const buzzedTeam = teams.find(t => t.id === buzzed)
+  const min = String(Math.floor(remaining / 60)).padStart(2, '0')
+  const sec = String(remaining % 60).padStart(2, '0')
+  const presets = [challenge.points, Math.ceil(challenge.points / 2), 10, 0]
+
+  return (
+    <section className={`challenge-card glass live-card ${finalMode ? 'final-card' : ''}`}>
+      <div className="challenge-meta">
+        <span className="category"><TerminalSquare size={15}/>{challenge.category}</span>
+        <span className="points">Barème maximum : {challenge.points} pts</span>
+      </div>
+
+      <div className="live-layout">
+        <div className="live-main">
+          <div className="live-title"><span>{finalMode ? 'LIVE CODE · FINALE' : 'LIVE CODE · QUALIFICATIONS'}</span><h2>{challenge.title}</h2><small>{challenge.level} · chrono automatique</small></div>
+          <div className="terminal-card">
+            <div className="terminal-bar"><span/><span/><span/><b>challenge://bootcamp</b></div>
+            <div className="terminal-content"><em>$ mission</em><p>{challenge.prompt}</p></div>
+          </div>
+          <div className="constraint-grid">
+            {challenge.constraints.map((item, i) => <div key={item}><span>{String(i + 1).padStart(2, '0')}</span><p>{item}</p></div>)}
+          </div>
+        </div>
+
+        <aside className="host-panel">
+          <div className="host-head"><div><Settings2 size={17}/><span>Console animateur</span></div><small>Évaluation manuelle</small></div>
+          <div className="timer-control">
+            <div><Clock3 size={19}/><strong>{min}:{sec}</strong></div>
+            <div>
+              <button onClick={() => setRunning(v => !v)} disabled={remaining === 0 || awarded}>{running ? <Pause size={15}/> : <Play size={15}/>}</button>
+              <button onClick={() => { setRemaining(challenge.time); setRunning(false) }} disabled={awarded}><RotateCcw size={15}/></button>
+            </div>
+          </div>
+
+          {buzzed === null && !awarded && <div className="claim-zone">
+            <span>Une équipe clique seulement sur « Je réponds ».</span>
+            <div className="claim-buttons">
+              {teams.map(team => <button key={team.id} onClick={() => claim(team.id)}><kbd>{KEY_LABELS[team.id]}</kbd><strong>{team.name}</strong><small>JE RÉPONDS</small></button>)}
+            </div>
+          </div>}
+
+          {buzzed !== null && !awarded && <div className="award-zone">
+            <div className="buzz-lock"><Zap size={18}/><div><span>Réponse verrouillée</span><strong>{buzzedTeam?.name}</strong></div></div>
+            <p>Écoutez ou observez le code dans le terminal, puis attribuez vous-même les points.</p>
+            <div className="preset-grid">
+              {presets.map((pts, i) => <button key={`${pts}-${i}`} onClick={() => award(pts)} className={pts === challenge.points ? 'max' : ''}>{pts > 0 ? `+${pts}` : '0'} pts</button>)}
+            </div>
+            <div className="custom-score"><input type="number" min="0" max={challenge.points} value={custom} onChange={e => setCustom(e.target.value)} placeholder="Points personnalisés"/><button onClick={() => award(custom)} disabled={custom === ''}>Attribuer</button></div>
+            <button className="release-btn" onClick={() => { setBuzzed(null); setRunning(true) }}><RotateCcw size={14}/> Libérer le buzzer sans point</button>
+          </div>}
+
+          <button className="rubric-btn" onClick={() => setShowRubric(v => !v)}>{showRubric ? <X size={15}/> : <CircleHelp size={15}/>} {showRubric ? 'Masquer la grille' : 'Afficher la grille de correction'}</button>
+          {showRubric && <div className="rubric"><span>Éléments attendus</span>{challenge.expected.map(item => <div key={item}><Check size={13}/><code>{item}</code></div>)}<p>{challenge.note}</p></div>}
+
+          {awarded && <div className="award-confirm"><Award size={26}/><strong>Points enregistrés</strong><span>Le score a été mis à jour par l’animateur.</span><button className="primary-btn" onClick={next}>Challenge suivant <ChevronRight size={17}/></button></div>}
+        </aside>
+      </div>
     </section>
   )
 }
@@ -317,24 +712,44 @@ function Feedback({ result, answer, explanation, onNext }) {
     <div className={`feedback ${result}`}>
       <div className="feedback-icon">{result === 'correct' ? <Award/> : <RotateCcw/>}</div>
       <div><span>{result === 'correct' ? 'Bonne réponse' : 'Réponse incorrecte'}</span><strong>{answer}</strong><p>{explanation}</p></div>
-      <button onClick={onNext}>Question suivante <ChevronRight size={18}/></button>
+      <button onClick={onNext}>Suivante <ChevronRight size={18}/></button>
     </div>
   )
 }
 
-function RoundSummary({ teamNames, scores, resetGame, goHome }) {
-  const winner = scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1
+function RoundSummary({ teams, returnToLobby }) {
+  const ordered = [...teams].sort((a, b) => b.score - a.score)
   return (
     <main className="summary-page">
       <section className="summary-card glass">
-        <div className="trophy-wrap"><Trophy size={52}/></div>
-        <span className="summary-label">FIN DE LA MANCHE</span>
-        <h1>{winner === null ? 'ÉGALITÉ PARFAITE' : `${teamNames[winner]} PREND LA TÊTE`}</h1>
-        <p>Les scores restent conservés pour enchaîner une autre manche.</p>
-        <div className="summary-scores">
-          {teamNames.map((name, i) => <div className={winner === i ? 'winner' : ''} key={name}><Medal size={22}/><span>{name}</span><strong>{scores[i]}</strong><small>points</small></div>)}
+        <div className="trophy-wrap"><Medal size={48}/></div>
+        <span className="summary-label">MANCHE TERMINÉE</span>
+        <h1>{ordered[0]?.name} est en tête</h1>
+        <p>Les scores restent cumulés jusqu’à ce que l’animateur clôture la phase.</p>
+        <div className={`summary-scores count-${teams.length}`}>
+          {ordered.map((team, i) => <div className={i === 0 ? 'winner' : ''} key={team.id}><div className="rank-pill">#{i + 1}</div><span>{team.name}</span><strong>{team.score}</strong><small>points</small></div>)}
         </div>
-        <div className="summary-actions"><button className="secondary-btn" onClick={goHome}>Choisir une autre manche</button><button className="primary-btn" onClick={resetGame}>Nouvelle partie</button></div>
+        <button className="primary-btn" onClick={returnToLobby}>Retour au tableau de bord <ChevronRight size={18}/></button>
+      </section>
+    </main>
+  )
+}
+
+function WinnerScreen({ teams, qualificationSnapshot, resetAll }) {
+  const ordered = [...teams].sort((a, b) => b.score - a.score)
+  const winner = ordered[0]
+  return (
+    <main className="winner-page">
+      <section className="winner-card glass">
+        <div className="winner-crown"><Trophy size={64}/></div>
+        <span className="summary-label">BOOTCAMP CHAMPION</span>
+        <h1>{winner?.name}</h1>
+        <div className="winner-score">{winner?.score}<span>PTS</span></div>
+        <div className="final-duel">
+          {ordered.map((team, i) => <div key={team.id}><span>#{i + 1}</span><strong>{team.name}</strong><b>{team.score} pts</b></div>)}
+        </div>
+        {qualificationSnapshot.length > 0 && <p className="winner-memory">Qualifications : {qualificationSnapshot.map((t, i) => `${i + 1}. ${t.name} — ${t.score} pts`).join(' · ')}</p>}
+        <button className="primary-btn" onClick={resetAll}>Nouvelle compétition</button>
       </section>
     </main>
   )
