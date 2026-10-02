@@ -21,9 +21,9 @@ const KEYS = ['a', 'g', 'l']
 const KEY_LABELS = ['A', 'G', 'L']
 
 const emptyTeams = () => [
-  { id: 0, name: 'Cookies', members: [], score: 0, registered: true },
-  { id: 1, name: 'EVH', members: [], score: 0, registered: true },
-  { id: 2, name: 'N4SC', members: [], score: 0, registered: true },
+  { id: 0, name: 'Cookies', username: 'cookies', members: [], score: 0, registered: true },
+  { id: 1, name: 'EVH', username: 'evh', members: [], score: 0, registered: true },
+  { id: 2, name: 'N4SC', username: 'n4sc', members: [], score: 0, registered: true },
 ]
 
 const normalize = (value = '') => value
@@ -77,10 +77,10 @@ function questionsForMode(mode) {
 }
 
 async function emitTeamBuzz() {
-  const token = sessionStorage.getItem(TEAM_TOKEN_KEY)
-  if (!token) return { ok: false, message: 'Reconnectez votre équipe.' }
+  const teamId = Number(sessionStorage.getItem(TEAM_ID_KEY))
+  if (![0, 1, 2].includes(teamId)) return { ok: false, message: 'Reconnectez votre équipe.' }
   try {
-    return await api('/api/team/buzz', { method: 'POST', token })
+    return await api('/api/team/buzz', { method: 'POST', body: { teamId } })
   } catch (error) {
     return { ok: false, message: error.message }
   }
@@ -138,7 +138,7 @@ export default function App() {
       } catch {}
 
       const adminToken = sessionStorage.getItem(ADMIN_TOKEN_KEY)
-      const teamToken = sessionStorage.getItem(TEAM_TOKEN_KEY)
+      const storedTeamId = Number(sessionStorage.getItem(TEAM_ID_KEY))
       if (adminToken) {
         try {
           const me = await api('/api/auth/me', { token: adminToken })
@@ -146,17 +146,8 @@ export default function App() {
         } catch {
           sessionStorage.removeItem(ADMIN_TOKEN_KEY)
         }
-      } else if (teamToken) {
-        try {
-          const me = await api('/api/auth/me', { token: teamToken })
-          if (!cancelled && me.role === 'team') {
-            setTeamSessionId(me.teamId)
-            sessionStorage.setItem(TEAM_ID_KEY, String(me.teamId))
-          }
-        } catch {
-          sessionStorage.removeItem(TEAM_TOKEN_KEY)
-          sessionStorage.removeItem(TEAM_ID_KEY)
-        }
+      } else if ([0, 1, 2].includes(storedTeamId)) {
+        if (!cancelled) setTeamSessionId(storedTeamId)
       }
     }
 
@@ -212,18 +203,15 @@ export default function App() {
     setAdminAuthenticated(false)
   }
 
-  const loginTeam = async (name, accessCode) => {
-    try {
-      const data = await api('/api/auth/team', { method: 'POST', body: { name, accessCode } })
-      sessionStorage.removeItem(ADMIN_TOKEN_KEY)
-      setAdminAuthenticated(false)
-      sessionStorage.setItem(TEAM_TOKEN_KEY, data.token)
-      sessionStorage.setItem(TEAM_ID_KEY, String(data.teamId))
-      setTeamSessionId(data.teamId)
-      return { ok: true, teamId: data.teamId }
-    } catch (error) {
-      return { ok: false, message: error.message }
-    }
+  const loginTeam = async (teamId) => {
+    const id = Number(teamId)
+    if (![0, 1, 2].includes(id)) return { ok: false, message: 'Sélectionnez une équipe.' }
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+    sessionStorage.removeItem(TEAM_TOKEN_KEY)
+    setAdminAuthenticated(false)
+    sessionStorage.setItem(TEAM_ID_KEY, String(id))
+    setTeamSessionId(id)
+    return { ok: true, teamId: id }
   }
 
   const logoutTeam = () => {
@@ -389,33 +377,61 @@ export default function App() {
 
 
 function TeamLoginModal({ loginTeam, teams = emptyTeams(), onClose }) {
-  const [name, setName] = useState(teams[0]?.name || 'Cookies')
-  const [code, setCode] = useState('')
+  const [selectedTeamId, setSelectedTeamId] = useState(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const chooseTeam = team => {
+    setSelectedTeamId(team.id)
+    setError('')
+  }
+
   const submit = async e => {
     e.preventDefault()
-    const result = await loginTeam(name, code)
+    if (selectedTeamId === null) {
+      setError('Choisissez d’abord votre équipe.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    const result = await loginTeam(selectedTeamId)
+    setLoading(false)
     if (!result.ok) { setError(result.message); return }
     onClose?.()
   }
+
   return (
     <div className="admin-modal-backdrop" role="dialog" aria-modal="true">
       <form className="admin-modal team-login-modal glass" onSubmit={submit}>
         <div className="admin-modal-icon team-icon"><Users size={24}/></div>
-        <span className="summary-label">CONNEXION ÉQUIPE</span>
-        <h2>Entrer dans le challenge</h2>
-        <p>Choisissez votre équipe préconfigurée puis saisissez son code de connexion.</p>
-        <label>
-          <small>Équipe</small>
-          <select value={name} onChange={e => setName(e.target.value)} autoFocus>
-            {teams.filter(team => team.registered).map(team => <option key={team.id} value={team.name}>{team.name}</option>)}
-          </select>
-        </label>
-        <label><small>Code équipe</small><input type="password" value={code} onChange={e => setCode(e.target.value)} placeholder="Code fourni par l’animateur"/></label>
+        <span className="summary-label">ACCÈS PARTICIPANT</span>
+        <h2>Choisissez votre équipe</h2>
+        <p>Aucun mot de passe. Sélectionnez simplement votre équipe puis attendez que l’administrateur lance le challenge.</p>
+
+        <div className="participant-team-picker participant-simple-picker">
+          {teams.filter(team => team.registered).map(team => {
+            const selected = selectedTeamId === team.id
+            return (
+              <button
+                key={team.id}
+                type="button"
+                className={`participant-team-choice ${selected ? 'selected' : ''}`}
+                onClick={() => chooseTeam(team)}
+                aria-pressed={selected}
+              >
+                <span className={`mini-team-dot team-${team.id}`}/>
+                <span><strong>{team.name}</strong><small>Buzzer {KEY_LABELS[team.id]}</small></span>
+                <span className={`team-choice-check ${selected ? 'checked' : ''}`}>{selected ? <Check size={15}/> : null}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="team-login-wait-note"><Clock3 size={16}/><span>Après connexion, votre écran reste en attente jusqu’au lancement par l’admin.</span></div>
         {error && <div className="admin-login-error">{error}</div>}
         <div className="admin-modal-actions">
           <button className="secondary-btn" type="button" onClick={onClose}>Annuler</button>
-          <button className="primary-btn" type="submit"><LogIn size={17}/> Connexion équipe</button>
+          <button className="primary-btn" type="submit" disabled={loading || selectedTeamId === null}><LogIn size={17}/>{loading ? 'Connexion…' : 'Entrer dans mon équipe'}</button>
         </div>
       </form>
     </div>
@@ -515,9 +531,9 @@ function AccessGate({ loginAdmin, loginTeam, teams, screen, stage }) {
         <div className="brand access-brand"><div className="brand-icon"><Network size={19}/></div><div><strong>BOOTCAMP</strong><span>CHAMPION</span></div></div>
         <span className="summary-label">SESSION EN COURS</span>
         <h1>{stage === 'final' ? 'Grande finale' : 'Challenge en cours'}</h1>
-        <p>Choisissez votre accès. Cookies, EVH et N4SC peuvent se connecter depuis n’importe quel téléphone ou ordinateur avec leur code.</p>
+        <p>Choisissez votre accès. Les participants choisissent simplement leur équipe depuis leur téléphone ou ordinateur, sans mot de passe.</p>
         <div className="access-gate-actions">
-          <button className="primary-btn" onClick={() => setMode('team')}><Users size={18}/> Connexion équipe</button>
+          <button className="primary-btn" onClick={() => setMode('team')}><Users size={18}/> Connexion participant</button>
           <button className="secondary-btn" onClick={() => setMode('admin')}><KeyRound size={17}/> Connexion admin</button>
         </div>
         <small>État actuel : {screen} · {stage}</small>
@@ -597,7 +613,7 @@ function Registration({ teams, startCompetition, adminAuthenticated, loginAdmin,
       <section className="hero-copy registration-hero">
         <div className="eyebrow"><Activity size={14}/> ÉQUIPES PRÉCONFIGURÉES</div>
         <h1>3 ÉQUIPES.<br/><span>2 PLACES EN FINALE.</span></h1>
-        <p>Les équipes sont déjà créées sur le serveur : Cookies, EVH et N4SC. Aucun formulaire d’inscription n’est nécessaire.</p>
+        <p>Les équipes sont déjà créées sur le serveur : Cookies, EVH et N4SC. Les participants choisissent leur équipe sans mot de passe, puis attendent le lancement par l’administrateur.</p>
         <div className="registration-progress">
           <div className="registration-progress-copy"><span>Équipes prêtes</span><strong>3/3</strong></div>
           <div className="registration-progress-bar"><i style={{ width: '100%' }}/></div>
@@ -631,7 +647,7 @@ function Registration({ teams, startCompetition, adminAuthenticated, loginAdmin,
 
         <div className="registration-note"><ShieldCheck size={17}/><span>Les scores sont gardés uniquement en mémoire sur le serveur pendant la session. Aucun fichier de persistance n’est créé.</span></div>
         <div className="entry-actions">
-          <button className="primary-btn team-entry-btn" type="button" onClick={() => setShowTeamLogin(true)}><Users size={17}/> Connexion équipe</button>
+          <button className="primary-btn team-entry-btn" type="button" onClick={() => setShowTeamLogin(true)}><Users size={17}/> Connexion participant</button>
           {!adminAuthenticated && <button className="secondary-btn admin-entry-btn" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={16}/> Connexion admin</button>}
         </div>
         {adminAuthenticated && <div className="admin-ready-panel">

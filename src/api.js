@@ -1,8 +1,8 @@
 import { io } from 'socket.io-client'
 
-export const ADMIN_TOKEN_KEY = 'bootcamp-champion-admin-token-v8'
-export const TEAM_TOKEN_KEY = 'bootcamp-champion-team-token-v8'
-export const TEAM_ID_KEY = 'bootcamp-champion-team-id-v8'
+export const ADMIN_TOKEN_KEY = 'bootcamp-champion-admin-token-v12'
+export const TEAM_TOKEN_KEY = 'bootcamp-champion-team-token-v12'
+export const TEAM_ID_KEY = 'bootcamp-champion-team-id-v12'
 
 export async function api(path, { method = 'GET', body, token } = {}) {
   const response = await fetch(path, {
