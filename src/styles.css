@@ -49,3 +49,27 @@
 .team-selector strong{font:600 11px 'Space Grotesk';color:#d4caff}
 @media(max-width:900px){.mode-grid{grid-template-columns:1fr 1fr!important}}
 @media(max-width:650px){.mode-grid{grid-template-columns:1fr!important}}
+
+/* V5 — accès administrateur + attribution manuelle globale des points */
+.admin-chip{border:1px solid rgba(86,216,155,.2);background:rgba(86,216,155,.06);color:#73dca9;border-radius:999px;padding:8px 11px;display:flex;align-items:center;gap:6px;font:700 9px 'Space Grotesk';letter-spacing:.08em}
+.admin-login-link{width:100%;margin-top:8px;border:1px dashed rgba(139,92,246,.25);background:transparent;color:#8f82bd;border-radius:10px;padding:10px;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;font:600 9px 'Space Grotesk';letter-spacing:.04em}
+.admin-login-link:hover{border-color:rgba(139,92,246,.5);color:#b5a5ec;background:rgba(139,92,246,.035)}
+.admin-modal-backdrop{position:fixed;inset:0;z-index:100;background:rgba(3,5,10,.78);backdrop-filter:blur(13px);display:grid;place-items:center;padding:18px}
+.admin-modal{width:min(100%,430px);padding:28px;border-radius:20px;box-shadow:0 30px 100px rgba(0,0,0,.5)}
+.admin-modal-icon{width:50px;height:50px;border-radius:15px;display:grid;place-items:center;margin-bottom:13px;color:#b39dff;background:rgba(139,92,246,.11);border:1px solid rgba(139,92,246,.21)}
+.admin-modal h2{font:700 25px 'Space Grotesk';margin:5px 0 7px}.admin-modal>p{color:#778196;font-size:10px;line-height:1.55;margin:0 0 18px}
+.admin-modal label{display:block;margin:10px 0}.admin-modal label small{display:block;color:#687287;text-transform:uppercase;font-size:8px;letter-spacing:.11em;margin-bottom:6px}
+.admin-modal input{width:100%;height:43px;border:1px solid var(--line);background:#090d15;border-radius:10px;padding:0 12px;outline:none;font:600 12px 'Space Grotesk'}
+.admin-modal input:focus{border-color:rgba(139,92,246,.45);box-shadow:0 0 0 3px rgba(139,92,246,.06)}
+.admin-login-error{border:1px solid rgba(255,111,128,.22);background:rgba(255,111,128,.055);color:#ff93a0;border-radius:9px;padding:9px 10px;font-size:9px;margin-top:8px}
+.admin-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:17px}.admin-modal-actions .primary-btn,.admin-modal-actions .secondary-btn{min-height:40px}
+.admin-score-panel{width:min(1180px,100%);margin:12px auto 18px;border-radius:14px;padding:0!important;overflow:hidden}
+.admin-score-panel summary{list-style:none;cursor:pointer;padding:12px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(139,92,246,.035)}
+.admin-score-panel summary::-webkit-details-marker{display:none}.admin-score-panel summary>div{display:flex;align-items:center;gap:8px;color:#b29dff}.admin-score-panel summary span{font:700 10px 'Space Grotesk';letter-spacing:.04em}.admin-score-panel summary small{font-size:8px;color:#616b7f;text-transform:uppercase;letter-spacing:.08em}
+.admin-score-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px;border-top:1px solid var(--line)}
+.admin-score-panel.compact .admin-score-grid{grid-template-columns:repeat(3,1fr)}
+.admin-score-team{border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.018);padding:10px}.admin-score-title{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:7px;margin-bottom:8px}.admin-score-title strong{font:600 10px 'Space Grotesk';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.admin-score-title b{font:700 10px 'Space Grotesk';color:#c6baff}.mini-team-dot{width:8px;height:8px;border-radius:50%;background:#8b5cf6;box-shadow:0 0 9px rgba(139,92,246,.35)}.mini-team-dot.team-1{background:#35c8e8}.mini-team-dot.team-2{background:#f4b84a}
+.admin-score-actions{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}.admin-score-actions button{height:29px;border:1px solid var(--line);border-radius:7px;background:rgba(255,255,255,.025);display:flex;align-items:center;justify-content:center;gap:2px;color:#8d97aa;cursor:pointer;font:700 8px 'Space Grotesk'}.admin-score-actions button:hover{border-color:rgba(139,92,246,.3);color:#c2b3f4}
+.admin-score-custom{display:grid;grid-template-columns:1fr auto;gap:5px;margin-top:6px}.admin-score-custom input{height:32px;min-width:0;border:1px solid var(--line);border-radius:7px;background:#090d15;padding:0 8px;font-size:9px;outline:none}.admin-score-custom button{border:0;border-radius:7px;padding:0 9px;background:#7250da;color:white;cursor:pointer;font:700 8px 'Space Grotesk'}
+@media(max-width:900px){.admin-score-grid,.admin-score-panel.compact .admin-score-grid{grid-template-columns:1fr}.admin-modal{padding:22px}}
+@media(max-width:650px){.admin-chip{display:none}.admin-modal-actions{flex-direction:column-reverse}.admin-modal-actions>*{width:100%}.header-actions .tiny-btn{font-size:0}.header-actions .tiny-btn svg{margin:0}}

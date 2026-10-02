@@ -3,7 +3,7 @@ import {
   Activity, Award, Binary, BrainCircuit, Check, ChevronRight, CircleHelp,
   Clock3, Code2, Crown, Gauge, Medal, Network, Pause, Play, RotateCcw,
   Settings2, ShieldCheck, Sparkles, Swords, TerminalSquare, Trophy, Users,
-  UserPlus, Trash2, X, Zap
+  UserPlus, Trash2, X, Zap, KeyRound, LogIn, LogOut, Plus, Minus
 } from 'lucide-react'
 import {
   quizQuestions,
@@ -18,6 +18,7 @@ import {
 
 const KEYS = ['a', 'g', 'l']
 const KEY_LABELS = ['A', 'G', 'L']
+const DEFAULT_ADMIN = { username: 'admin', password: 'admin12' }
 
 const emptyTeams = () => [
   { id: 0, name: '', members: [], score: 0, registered: false },
@@ -73,9 +74,11 @@ export default function App() {
   const [questionSet, setQuestionSet] = useState([])
   const [index, setIndex] = useState(0)
   const [roundDone, setRoundDone] = useState(false)
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false)
 
   useEffect(() => {
-    const saved = localStorage.getItem('bootcamp-champion-state-v4')
+    setAdminAuthenticated(sessionStorage.getItem('bootcamp-champion-admin-v5') === '1')
+    const saved = localStorage.getItem('bootcamp-champion-state-v5')
     if (!saved) return
     try {
       const state = JSON.parse(saved)
@@ -89,7 +92,7 @@ export default function App() {
 
   useEffect(() => {
     if (screen === 'game') return
-    localStorage.setItem('bootcamp-champion-state-v4', JSON.stringify({ teams, finalists, qualificationSnapshot, screen, stage }))
+    localStorage.setItem('bootcamp-champion-state-v5', JSON.stringify({ teams, finalists, qualificationSnapshot, screen, stage }))
   }, [teams, finalists, qualificationSnapshot, screen, stage])
 
   const activeTeamIds = stage === 'final' ? finalists : teams.map(t => t.id)
@@ -115,13 +118,29 @@ export default function App() {
 
   const addScore = (id, points) => setTeams(list => list.map(team => team.id === id ? { ...team, score: Math.max(0, team.score + Number(points || 0)) } : team))
 
-  const startCompetition = () => {
-    if (teams.filter(team => team.registered).length !== 3) return
+  const loginAdmin = (username, password) => {
+    if (username.trim() !== DEFAULT_ADMIN.username || password !== DEFAULT_ADMIN.password) {
+      return { ok: false, message: 'Identifiant ou mot de passe incorrect.' }
+    }
+    sessionStorage.setItem('bootcamp-champion-admin-v5', '1')
+    setAdminAuthenticated(true)
+    return { ok: true }
+  }
+
+  const logoutAdmin = () => {
+    sessionStorage.removeItem('bootcamp-champion-admin-v5')
+    setAdminAuthenticated(false)
+  }
+
+  const startCompetition = (forceAdmin = false) => {
+    if (!adminAuthenticated && !forceAdmin) return false
+    if (teams.filter(team => team.registered).length !== 3) return false
     setTeams(list => list.map(team => ({ ...team, score: 0 })))
     setFinalists([])
     setQualificationSnapshot([])
     setStage('qualification')
     setScreen('lobby')
+    return true
   }
 
   const startMode = (mode) => {
@@ -167,7 +186,7 @@ export default function App() {
   }
 
   const resetAll = () => {
-    localStorage.removeItem('bootcamp-champion-state-v4')
+    localStorage.removeItem('bootcamp-champion-state-v5')
     setTeams(emptyTeams())
     setFinalists([])
     setQualificationSnapshot([])
@@ -179,13 +198,23 @@ export default function App() {
     setRoundDone(false)
   }
 
+  if (screen !== 'registration' && !adminAuthenticated) {
+    return (
+      <div className="app-shell">
+        <Background />
+        <Header stage={stage} screen={screen} resetAll={resetAll} adminAuthenticated={false} logoutAdmin={logoutAdmin} />
+        <AdminLock loginAdmin={loginAdmin} />
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <Background />
-      <Header stage={stage} screen={screen} resetAll={resetAll} />
+      <Header stage={stage} screen={screen} resetAll={resetAll} adminAuthenticated={adminAuthenticated} logoutAdmin={logoutAdmin} />
 
       {screen === 'registration' && (
-        <Registration teams={teams} registerTeam={registerTeam} unregisterTeam={unregisterTeam} startCompetition={startCompetition} />
+        <Registration teams={teams} registerTeam={registerTeam} unregisterTeam={unregisterTeam} startCompetition={startCompetition} adminAuthenticated={adminAuthenticated} loginAdmin={loginAdmin} />
       )}
 
       {screen === 'lobby' && (
@@ -197,6 +226,7 @@ export default function App() {
           closeQualifications={closeQualifications}
           finishFinal={() => setScreen('winner')}
           qualificationSnapshot={qualificationSnapshot}
+          addScore={addScore}
         />
       )}
 
@@ -221,6 +251,7 @@ export default function App() {
           next={next}
           roundDone={roundDone}
           returnToLobby={returnToLobby}
+          adminAuthenticated={adminAuthenticated}
         />
       )}
 
@@ -231,11 +262,80 @@ export default function App() {
   )
 }
 
+
+function AdminLoginModal({ loginAdmin, onClose = null, onSuccess, canLaunch = false }) {
+  const [username, setUsername] = useState('admin')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  const submit = (e) => {
+    e.preventDefault()
+    const result = loginAdmin(username, password)
+    if (!result.ok) { setError(result.message); return }
+    onSuccess?.()
+  }
+
+  return (
+    <div className="admin-modal-backdrop" role="dialog" aria-modal="true">
+      <form className="admin-modal glass" onSubmit={submit}>
+        <div className="admin-modal-icon"><KeyRound size={24}/></div>
+        <span className="summary-label">ACCÈS ADMINISTRATEUR</span>
+        <h2>Console du challenge</h2>
+        <p>Connexion requise pour lancer les manches et attribuer ou corriger les points.</p>
+        <label><small>Identifiant</small><input autoFocus value={username} onChange={e => setUsername(e.target.value)} autoComplete="username"/></label>
+        <label><small>Mot de passe</small><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" placeholder="Mot de passe"/></label>
+        {error && <div className="admin-login-error">{error}</div>}
+        <div className="admin-modal-actions">
+          {onClose && <button className="secondary-btn" type="button" onClick={onClose}>Annuler</button>}
+          <button className="primary-btn" type="submit"><LogIn size={17}/>{canLaunch ? 'Se connecter et lancer' : 'Se connecter'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function AdminLock({ loginAdmin }) {
+  return <AdminLoginModal loginAdmin={loginAdmin} onSuccess={() => {}} />
+}
+
+function AdminScorePanel({ teams, addScore, compact = false }) {
+  const [custom, setCustom] = useState({})
+  const applyCustom = (id) => {
+    const value = Number(custom[id])
+    if (!Number.isFinite(value) || value === 0) return
+    addScore(id, value)
+    setCustom(values => ({ ...values, [id]: '' }))
+  }
+  return (
+    <details className={`admin-score-panel glass ${compact ? 'compact' : ''}`}>
+      <summary><div><ShieldCheck size={16}/><span>Administration des points</span></div><small>Ajout / retrait manuel</small></summary>
+      <div className="admin-score-grid">
+        {teams.map(team => (
+          <div className="admin-score-team" key={team.id}>
+            <div className="admin-score-title"><span className={`mini-team-dot team-${team.id}`}/><strong>{team.name}</strong><b>{team.score} pts</b></div>
+            <div className="admin-score-actions">
+              <button onClick={() => addScore(team.id, -10)}><Minus size={13}/>10</button>
+              <button onClick={() => addScore(team.id, -5)}><Minus size={13}/>5</button>
+              <button onClick={() => addScore(team.id, 5)}><Plus size={13}/>5</button>
+              <button onClick={() => addScore(team.id, 10)}><Plus size={13}/>10</button>
+              <button onClick={() => addScore(team.id, 25)}><Plus size={13}/>25</button>
+            </div>
+            <div className="admin-score-custom">
+              <input type="number" value={custom[team.id] ?? ''} onChange={e => setCustom(v => ({ ...v, [team.id]: e.target.value }))} placeholder="ex. 15 ou -5"/>
+              <button onClick={() => applyCustom(team.id)}>Appliquer</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 function Background() {
   return <><div className="grid-bg"/><div className="glow glow-a"/><div className="glow glow-b"/></>
 }
 
-function Header({ stage, screen, resetAll }) {
+function Header({ stage, screen, resetAll, adminAuthenticated, logoutAdmin }) {
   return (
     <header className="topbar">
       <div className="brand">
@@ -244,16 +344,19 @@ function Header({ stage, screen, resetAll }) {
       </div>
       <div className="header-actions">
         {screen !== 'registration' && <div className="status-chip"><span className="live-dot"/>{stage === 'qualification' ? 'Qualifications · 3 équipes' : 'Finale · 2 équipes'}</div>}
-        {screen !== 'registration' && <button className="tiny-btn" onClick={resetAll}><RotateCcw size={14}/> Reset</button>}
+        {adminAuthenticated && <div className="admin-chip"><ShieldCheck size={13}/> ADMIN</div>}
+        {screen !== 'registration' && adminAuthenticated && <button className="tiny-btn" onClick={resetAll}><RotateCcw size={14}/> Reset</button>}
+        {adminAuthenticated && <button className="tiny-btn" onClick={logoutAdmin}><LogOut size={14}/> Déconnexion</button>}
       </div>
     </header>
   )
 }
 
-function Registration({ teams, registerTeam, unregisterTeam, startCompetition }) {
+function Registration({ teams, registerTeam, unregisterTeam, startCompetition, adminAuthenticated, loginAdmin }) {
   const [teamName, setTeamName] = useState('')
   const [membersText, setMembersText] = useState('')
   const [message, setMessage] = useState('')
+  const [showAdminLogin, setShowAdminLogin] = useState(false)
   const registered = teams.filter(team => team.registered)
   const isFull = registered.length === 3
 
@@ -273,6 +376,12 @@ function Registration({ teams, registerTeam, unregisterTeam, startCompetition })
   const remove = (id) => {
     unregisterTeam(id)
     setMessage('Place libérée. Une nouvelle équipe peut maintenant s’inscrire.')
+  }
+
+  const launch = () => {
+    if (!isFull) return
+    if (!adminAuthenticated) { setShowAdminLogin(true); return }
+    startCompetition()
   }
 
   return (
@@ -328,14 +437,16 @@ function Registration({ teams, registerTeam, unregisterTeam, startCompetition })
           ))}
         </div>
 
-        <div className="registration-note"><ShieldCheck size={17}/><span>Une fois les 3 équipes inscrites, l’animateur lance la compétition. Les touches A, G et L restent leurs buzzers pendant les manches.</span></div>
-        <button className="primary-btn wide launch-competition" onClick={startCompetition} disabled={!isFull}>Lancer les qualifications <ChevronRight size={18}/></button>
+        <div className="registration-note"><ShieldCheck size={17}/><span>Une fois les 3 équipes inscrites, seul l’administrateur peut lancer et piloter la compétition. Les touches A, G et L restent les buzzers des équipes.</span></div>
+        <button className="primary-btn wide launch-competition" onClick={launch} disabled={!isFull}>{adminAuthenticated ? 'Lancer les qualifications' : 'Connexion admin & lancement'} <ChevronRight size={18}/></button>
+        {!adminAuthenticated && <button className="admin-login-link" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={15}/> Accès administrateur</button>}
+        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={() => { setShowAdminLogin(false); if (isFull) startCompetition(true) }} canLaunch={isFull}/>}
       </section>
     </main>
   )
 }
 
-function Lobby({ stage, teams, modes, startMode, closeQualifications, finishFinal, qualificationSnapshot }) {
+function Lobby({ stage, teams, modes, startMode, closeQualifications, finishFinal, qualificationSnapshot, addScore }) {
   const ordered = [...teams].sort((a, b) => b.score - a.score)
   return (
     <main className="lobby-page">
@@ -349,6 +460,7 @@ function Lobby({ stage, teams, modes, startMode, closeQualifications, finishFina
       </section>
 
       <Scoreboard teams={teams} compact={false}/>
+      <AdminScorePanel teams={teams} addScore={addScore}/>
 
       <section className="mode-section glass">
         <div className="section-title"><div><span>02</span><h2>Épreuves dans l’ordre</h2></div><p>{stage === 'qualification' ? 'Quiz → Champion → Live Bash → Live Python' : 'Quiz final → Champion final → Bash → Python'}</p></div>
@@ -439,7 +551,7 @@ function FinalistSelection({ teams, finalists, setFinalists, confirm, back }) {
   )
 }
 
-function GameShell({ mode, question, index, total, teams, addScore, next, roundDone, returnToLobby }) {
+function GameShell({ mode, question, index, total, teams, addScore, next, roundDone, returnToLobby, adminAuthenticated }) {
   if (roundDone) return <RoundSummary teams={teams} returnToLobby={returnToLobby}/>
   return (
     <main className="game-page">
@@ -449,6 +561,7 @@ function GameShell({ mode, question, index, total, teams, addScore, next, roundD
         <div className="difficulty"><Gauge size={16}/> Bootcamp</div>
       </div>
       <Scoreboard teams={teams}/>
+      {adminAuthenticated && <AdminScorePanel teams={teams} addScore={addScore} compact/>}
       {(mode === 'champion' || mode === 'finalChampion') && <ChampionRound question={question} teams={teams} addScore={addScore} next={next} finalMode={mode === 'finalChampion'}/>}
       {(mode === 'quiz' || mode === 'finalQuiz') && <QcmRound question={question} teams={teams} addScore={addScore} next={next} seconds={mode === 'finalQuiz' ? 35 : 25} basePoints={mode === 'finalQuiz' ? 40 : 25} finalMode={mode === 'finalQuiz'}/>}
       {(['bash', 'python', 'finalBash', 'finalPython'].includes(mode)) && <LiveCodeRound challenge={question} teams={teams} addScore={addScore} next={next} finalMode={mode.startsWith('final')}/>} 
@@ -671,7 +784,7 @@ function LiveCodeRound({ challenge, teams, addScore, next, finalMode }) {
         </div>
 
         <aside className="host-panel">
-          <div className="host-head"><div><Settings2 size={17}/><span>Console animateur</span></div><small>Évaluation manuelle</small></div>
+          <div className="host-head"><div><ShieldCheck size={17}/><span>Console administrateur</span></div><small>Évaluation manuelle</small></div>
           <div className="timer-control">
             <div><Clock3 size={19}/><strong>{min}:{sec}</strong></div>
             <div>
