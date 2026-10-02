@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, Sparkles, Swords, TerminalSquare, Trophy, Users,
   X, Zap, KeyRound, LogIn, LogOut, Plus, Minus
 } from 'lucide-react'
-import { api, connectRealtime, ADMIN_TOKEN_KEY, TEAM_TOKEN_KEY, TEAM_ID_KEY, downloadAdminBackup } from './api'
+import { api, ADMIN_TOKEN_KEY, TEAM_ID_KEY } from './api'
 import {
   quizQuestions,
   championQuestions,
@@ -21,9 +21,9 @@ const KEYS = ['a', 'g', 'l']
 const KEY_LABELS = ['A', 'G', 'L']
 
 const emptyTeams = () => [
-  { id: 0, name: 'Cookies', username: 'cookies', members: [], score: 0, registered: true },
-  { id: 1, name: 'EVH', username: 'evh', members: [], score: 0, registered: true },
-  { id: 2, name: 'N4SC', username: 'n4sc', members: [], score: 0, registered: true },
+  { id: 0, name: 'Cookies', score: 0 },
+  { id: 1, name: 'EVH', score: 0 },
+  { id: 2, name: 'N4SC', score: 0 },
 ]
 
 const normalize = (value = '') => value
@@ -103,7 +103,7 @@ async function releaseAdminBuzz() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState('registration')
+  const [screen, setScreen] = useState('home')
   const [stage, setStage] = useState('qualification')
   const [teams, setTeams] = useState(emptyTeams)
   const [qualificationSnapshot, setQualificationSnapshot] = useState([])
@@ -120,7 +120,7 @@ export default function App() {
     if (Array.isArray(remote.teams) && remote.teams.length === 3) setTeams(remote.teams)
     if (Array.isArray(remote.finalists)) setFinalists(remote.finalists)
     if (Array.isArray(remote.qualificationSnapshot)) setQualificationSnapshot(remote.qualificationSnapshot)
-    if (['registration', 'lobby', 'finalists', 'winner', 'game'].includes(remote.screen)) setScreen(remote.screen)
+    if (['home', 'lobby', 'finalists', 'winner', 'game'].includes(remote.screen)) setScreen(remote.screen)
     if (['qualification', 'final'].includes(remote.stage)) setStage(remote.stage)
     setActiveMode(remote.activeMode || null)
     setQuestionSet(remote.activeMode ? [...questionsForMode(remote.activeMode)] : [])
@@ -158,25 +158,48 @@ export default function App() {
 
     restore()
 
-    const socket = connectRealtime()
-    socket.on('state:update', remote => {
-      if (!cancelled) applyRemoteState(remote)
-    })
-    socket.on('buzz:accepted', payload => {
-      window.dispatchEvent(new CustomEvent('bootcamp-team-buzz', { detail: payload }))
-    })
-    socket.on('buzz:released', payload => {
-      window.dispatchEvent(new CustomEvent('bootcamp-buzz-released', { detail: payload }))
-    })
+    let lastBuzzSignature = null
+    let inFlight = false
+
+    const refreshState = async () => {
+      if (cancelled || inFlight) return
+      inFlight = true
+      try {
+        const data = await api('/api/state')
+        if (cancelled) return
+        const remote = data.state
+        applyRemoteState(remote)
+
+        const locked = remote?.buzzLock !== null && remote?.buzzLock !== undefined
+        const signature = locked ? `${remote?.buzzChallenge || 'unknown'}:${remote.buzzLock}` : null
+
+        if (signature && signature !== lastBuzzSignature) {
+          window.dispatchEvent(new CustomEvent('bootcamp-team-buzz', {
+            detail: { teamId: remote.buzzLock, challenge: remote.buzzChallenge, at: Date.now() }
+          }))
+        } else if (!signature && lastBuzzSignature) {
+          window.dispatchEvent(new CustomEvent('bootcamp-buzz-released', { detail: { at: Date.now() } }))
+        }
+
+        lastBuzzSignature = signature
+      } catch {
+        // Une coupure réseau temporaire ne doit pas casser l'interface.
+      } finally {
+        inFlight = false
+      }
+    }
+
+    refreshState()
+    const poller = window.setInterval(refreshState, 750)
 
     return () => {
       cancelled = true
-      socket.close()
+      window.clearInterval(poller)
     }
   }, [])
 
   const activeTeamIds = stage === 'final' ? finalists : teams.map(t => t.id)
-  const visibleTeams = teams.filter(t => t.registered && activeTeamIds.includes(t.id))
+  const visibleTeams = teams.filter(t => activeTeamIds.includes(t.id))
 
   const addScore = async (id, points, reason = 'admin/game') => {
     const token = sessionStorage.getItem(ADMIN_TOKEN_KEY)
@@ -193,7 +216,6 @@ export default function App() {
     try {
       const data = await api('/api/auth/admin', { method: 'POST', body: { password } })
       sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token)
-      sessionStorage.removeItem(TEAM_TOKEN_KEY)
       sessionStorage.removeItem(TEAM_ID_KEY)
       setTeamSessionId(null)
       setAdminAuthenticated(true)
@@ -212,7 +234,6 @@ export default function App() {
     const id = Number(teamId)
     if (![0, 1, 2].includes(id)) return { ok: false, message: 'Sélectionnez une équipe.' }
     sessionStorage.removeItem(ADMIN_TOKEN_KEY)
-    sessionStorage.removeItem(TEAM_TOKEN_KEY)
     setAdminAuthenticated(false)
     sessionStorage.setItem(TEAM_ID_KEY, String(id))
     setTeamSessionId(id)
@@ -220,7 +241,6 @@ export default function App() {
   }
 
   const logoutTeam = () => {
-    sessionStorage.removeItem(TEAM_TOKEN_KEY)
     sessionStorage.removeItem(TEAM_ID_KEY)
     setTeamSessionId(null)
   }
@@ -240,7 +260,6 @@ export default function App() {
   const startCompetition = async () => {
     const token = sessionStorage.getItem(ADMIN_TOKEN_KEY)
     if (!token) return false
-    if (teams.filter(team => team.registered).length !== 3) return false
     try {
       const data = await api('/api/admin/competition/start', { method: 'POST', token })
       applyRemoteState(data.state)
@@ -264,8 +283,8 @@ export default function App() {
   }
 
   const closeQualifications = async () => {
-    const ordered = [...teams].filter(t => t.registered).sort((a, b) => b.score - a.score)
-    const snapshot = ordered.map(t => ({ id: t.id, name: t.name, members: t.members, score: t.score, registered: true }))
+    const ordered = [...teams].sort((a, b) => b.score - a.score)
+    const snapshot = ordered.map(t => ({ id: t.id, name: t.name, score: t.score }))
     const selected = [ordered[0].id, ordered[1].id]
     setQualificationSnapshot(snapshot)
     setFinalists(selected)
@@ -295,7 +314,6 @@ export default function App() {
     if (!token) return
     try {
       const data = await api('/api/admin/reset', { method: 'POST', token })
-      sessionStorage.removeItem(TEAM_TOKEN_KEY)
       sessionStorage.removeItem(TEAM_ID_KEY)
       setTeamSessionId(null)
       applyRemoteState(data.state)
@@ -305,7 +323,7 @@ export default function App() {
 
 
   if (teamSessionId !== null && !adminAuthenticated) {
-    const team = teams.find(t => t.id === teamSessionId && t.registered)
+    const team = teams.find(t => t.id === teamSessionId)
     if (team) {
       return (
         <div className="app-shell">
@@ -316,7 +334,7 @@ export default function App() {
     }
   }
 
-  if (screen !== 'registration' && !adminAuthenticated) {
+  if (screen !== 'home' && !adminAuthenticated) {
     return (
       <div className="app-shell">
         <Background />
@@ -331,8 +349,8 @@ export default function App() {
       <Background />
       <Header stage={stage} screen={screen} resetAll={resetAll} adminAuthenticated={adminAuthenticated} logoutAdmin={logoutAdmin} />
 
-      {screen === 'registration' && (
-        <Registration teams={teams} startCompetition={startCompetition} adminAuthenticated={adminAuthenticated} loginAdmin={loginAdmin} loginTeam={loginTeam} />
+      {screen === 'home' && (
+        <Home teams={teams} startCompetition={startCompetition} adminAuthenticated={adminAuthenticated} loginAdmin={loginAdmin} loginTeam={loginTeam} />
       )}
 
       {screen === 'lobby' && (
@@ -381,64 +399,29 @@ export default function App() {
 }
 
 
-function TeamLoginModal({ loginTeam, teams = emptyTeams(), onClose }) {
-  const [selectedTeamId, setSelectedTeamId] = useState(null)
+function TeamChoices({ teams, loginTeam, onChosen }) {
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loadingId, setLoadingId] = useState(null)
 
-  const chooseTeam = team => {
-    setSelectedTeamId(team.id)
+  const enter = async (teamId) => {
+    setLoadingId(teamId)
     setError('')
-  }
-
-  const submit = async e => {
-    e.preventDefault()
-    if (selectedTeamId === null) {
-      setError('Choisissez d’abord votre équipe.')
-      return
-    }
-    setLoading(true)
-    setError('')
-    const result = await loginTeam(selectedTeamId)
-    setLoading(false)
+    const result = await loginTeam(teamId)
+    setLoadingId(null)
     if (!result.ok) { setError(result.message); return }
-    onClose?.()
+    onChosen?.()
   }
 
   return (
-    <div className="admin-modal-backdrop" role="dialog" aria-modal="true">
-      <form className="admin-modal team-login-modal glass" onSubmit={submit}>
-        <div className="admin-modal-icon team-icon"><Users size={24}/></div>
-        <span className="summary-label">ACCÈS PARTICIPANT</span>
-        <h2>Choisissez votre équipe</h2>
-        <p>Aucun mot de passe. Sélectionnez simplement votre équipe puis attendez que l’administrateur lance le challenge.</p>
-
-        <div className="participant-team-picker participant-simple-picker">
-          {teams.filter(team => team.registered).map(team => {
-            const selected = selectedTeamId === team.id
-            return (
-              <button
-                key={team.id}
-                type="button"
-                className={`participant-team-choice ${selected ? 'selected' : ''}`}
-                onClick={() => chooseTeam(team)}
-                aria-pressed={selected}
-              >
-                <span className={`mini-team-dot team-${team.id}`}/>
-                <span><strong>{team.name}</strong><small>Buzzer {KEY_LABELS[team.id]}</small></span>
-                <span className={`team-choice-check ${selected ? 'checked' : ''}`}>{selected ? <Check size={15}/> : null}</span>
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="team-login-wait-note"><Clock3 size={16}/><span>Après connexion, votre écran reste en attente jusqu’au lancement par l’admin.</span></div>
-        {error && <div className="admin-login-error">{error}</div>}
-        <div className="admin-modal-actions">
-          <button className="secondary-btn" type="button" onClick={onClose}>Annuler</button>
-          <button className="primary-btn" type="submit" disabled={loading || selectedTeamId === null}><LogIn size={17}/>{loading ? 'Connexion…' : 'Entrer dans mon équipe'}</button>
-        </div>
-      </form>
+    <div className="direct-team-choices">
+      {teams.map(team => (
+        <button key={team.id} type="button" className={`participant-team-choice team-direct team-${team.id}`} onClick={() => enter(team.id)} disabled={loadingId !== null}>
+          <span className={`mini-team-dot team-${team.id}`}/>
+          <span><strong>{team.name}</strong><small>Buzzer {KEY_LABELS[team.id]}</small></span>
+          <ChevronRight size={18}/>
+        </button>
+      ))}
+      {error && <div className="admin-login-error">{error}</div>}
     </div>
   )
 }
@@ -480,20 +463,20 @@ function TeamPortal({ team, screen, stage, activeMode, index, isActive, logoutTe
         <div className={`team-portal-orb team-${team.id}`}><Users size={31}/></div>
         <span className="summary-label">ESPACE ÉQUIPE</span>
         <h1>{team.name}</h1>
-        <p>{team.members.length ? team.members.join(' · ') : 'Équipe préconfigurée'}</p>
+        <p>Équipe fixe du challenge</p>
         <div className="team-portal-stats">
           <div><span>Score</span><strong>{team.score}</strong><small>pts</small></div>
           <div><span>Buzzer</span><strong>{KEY_LABELS[team.id]}</strong><small>touche</small></div>
           <div><span>Phase</span><strong>{stage === 'qualification' ? 'QUALIF' : 'FINALE'}</strong><small>{screen}</small></div>
         </div>
         <div className={`team-status-card ${canBuzz ? 'live' : ''}`}>
-          {canBuzz ? <><Zap size={19}/><div><strong>{labels[activeMode] || 'Épreuve en cours'}</strong><span>Challenge {index + 1} · buzzez quand votre équipe souhaite répondre.</span></div></> : <><Clock3 size={19}/><div><strong>En attente de l’animateur</strong><span>{!isActive ? 'Votre équipe n’est pas qualifiée pour cette phase.' : screen === 'registration' ? 'Le challenge n’a pas encore été lancé.' : 'Attendez le lancement de la prochaine épreuve.'}</span></div></>}
+          {canBuzz ? <><Zap size={19}/><div><strong>{labels[activeMode] || 'Épreuve en cours'}</strong><span>Challenge {index + 1} · buzzez quand votre équipe souhaite répondre.</span></div></> : <><Clock3 size={19}/><div><strong>En attente de l’animateur</strong><span>{!isActive ? 'Votre équipe n’est pas qualifiée pour cette phase.' : screen === 'home' ? 'Le challenge n’a pas encore été lancé.' : 'Attendez le lancement de la prochaine épreuve.'}</span></div></>}
         </div>
         <button className={`team-buzz-big ${canBuzz ? 'ready' : ''}`} disabled={!canBuzz} onClick={doBuzz}>
           <Zap size={31}/><span>{canBuzz ? 'JE RÉPONDS / BUZZ' : 'BUZZER EN ATTENTE'}</span><kbd>{KEY_LABELS[team.id]}</kbd>
         </button>
         {buzzStatus && <div className="team-buzz-status">{buzzStatus}</div>}
-        <small className="team-portal-note">Connexion serveur temps réel active : les buzz et scores sont synchronisés entre les appareils.</small>
+        <small className="team-portal-note">Synchronisation Netlify active : les buzz et scores sont partagés entre les appareils.</small>
       </section>
     </main>
   )
@@ -529,22 +512,19 @@ function AdminLoginModal({ loginAdmin, onClose = null, onSuccess, canLaunch = fa
 }
 
 function AccessGate({ loginAdmin, loginTeam, teams, screen, stage }) {
-  const [mode, setMode] = useState(null)
+  const [showAdmin, setShowAdmin] = useState(false)
   return (
     <main className="access-gate-page">
       <section className="access-gate glass">
         <div className="brand access-brand"><div className="brand-icon"><Network size={19}/></div><div><strong>BOOTCAMP</strong><span>CHAMPION</span></div></div>
         <span className="summary-label">SESSION EN COURS</span>
         <h1>{stage === 'final' ? 'Grande finale' : 'Challenge en cours'}</h1>
-        <p>Choisissez votre accès. Les participants choisissent simplement leur équipe depuis leur téléphone ou ordinateur, sans mot de passe.</p>
-        <div className="access-gate-actions">
-          <button className="primary-btn" onClick={() => setMode('team')}><Users size={18}/> Connexion participant</button>
-          <button className="secondary-btn" onClick={() => setMode('admin')}><KeyRound size={17}/> Connexion admin</button>
-        </div>
+        <p>Choisissez directement votre équipe pour rejoindre son buzzer. Aucun compte participant, aucun formulaire.</p>
+        <TeamChoices teams={teams} loginTeam={loginTeam}/>
+        <button className="secondary-btn admin-access-wide" onClick={() => setShowAdmin(true)}><KeyRound size={17}/> Accès administrateur</button>
         <small>État actuel : {screen} · {stage}</small>
       </section>
-      {mode === 'team' && <TeamLoginModal loginTeam={loginTeam} teams={teams} onClose={() => setMode(null)} />}
-      {mode === 'admin' && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setMode(null)} onSuccess={() => setMode(null)} />}
+      {showAdmin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdmin(false)} onSuccess={() => setShowAdmin(false)} />}
     </main>
   )
 }
@@ -594,19 +574,17 @@ function Header({ stage, screen, resetAll, adminAuthenticated, logoutAdmin }) {
         <div><strong>BOOTCAMP</strong><span>CHAMPION</span></div>
       </div>
       <div className="header-actions">
-        {screen !== 'registration' && <div className="status-chip"><span className="live-dot"/>{stage === 'qualification' ? 'Qualifications · 3 équipes' : 'Finale · 2 équipes'}</div>}
+        {screen !== 'home' && <div className="status-chip"><span className="live-dot"/>{stage === 'qualification' ? 'Qualifications · 3 équipes' : 'Finale · 2 équipes'}</div>}
         {adminAuthenticated && <div className="admin-chip"><ShieldCheck size={13}/> ADMIN</div>}
-        {screen !== 'registration' && adminAuthenticated && <button className="tiny-btn" onClick={resetAll}><RotateCcw size={14}/> Reset</button>}
+        {screen !== 'home' && adminAuthenticated && <button className="tiny-btn" onClick={resetAll}><RotateCcw size={14}/> Reset</button>}
         {adminAuthenticated && <button className="tiny-btn" onClick={logoutAdmin}><LogOut size={14}/> Déconnexion</button>}
       </div>
     </header>
   )
 }
 
-function Registration({ teams, startCompetition, adminAuthenticated, loginAdmin, loginTeam }) {
+function Home({ teams, startCompetition, adminAuthenticated, loginAdmin, loginTeam }) {
   const [showAdminLogin, setShowAdminLogin] = useState(false)
-  const [showTeamLogin, setShowTeamLogin] = useState(false)
-  const isReady = teams.filter(team => team.registered).length === 3
 
   const launch = async () => {
     if (!adminAuthenticated) { setShowAdminLogin(true); return }
@@ -614,54 +592,28 @@ function Registration({ teams, startCompetition, adminAuthenticated, loginAdmin,
   }
 
   return (
-    <main className="registration-page registration-self-service">
-      <section className="hero-copy registration-hero">
-        <div className="eyebrow"><Activity size={14}/> ÉQUIPES PRÉCONFIGURÉES</div>
+    <main className="home-page home-self-service">
+      <section className="hero-copy home-hero">
+        <div className="eyebrow"><Activity size={14}/> CHALLENGE PRÊT</div>
         <h1>3 ÉQUIPES.<br/><span>2 PLACES EN FINALE.</span></h1>
-        <p>Les équipes sont déjà créées sur le serveur : Cookies, EVH et N4SC. Les participants choisissent leur équipe sans mot de passe, puis attendent le lancement par l’administrateur.</p>
-        <div className="registration-progress">
-          <div className="registration-progress-copy"><span>Équipes prêtes</span><strong>3/3</strong></div>
-          <div className="registration-progress-bar"><i style={{ width: '100%' }}/></div>
-        </div>
+        <p>Cookies, EVH et N4SC sont fixes. Chaque participant choisit directement son équipe et attend que l’administrateur lance la compétition.</p>
       </section>
 
-      <section className="registration-card glass">
+      <section className="home-card glass">
         <div className="panel-heading">
-          <div><span>01</span><h2>Équipes du challenge</h2></div>
+          <div><span>01</span><h2>Choisir son équipe</h2></div>
           <Users size={23}/>
         </div>
 
-        <div className="registration-complete">
-          <div className="registration-complete-icon"><Check size={22}/></div>
-          <div><strong>Les trois équipes sont prêtes</strong><span>L’admin peut lancer les qualifications immédiatement.</span></div>
-        </div>
+        <TeamChoices teams={teams} loginTeam={loginTeam}/>
 
-        <div className="registered-teams">
-          {teams.map((team, i) => (
-            <div className="registered-team filled" key={team.id}>
-              <div className={`team-avatar team-${i}`}><span>{i + 1}</span></div>
-              <div className="registered-team-copy">
-                <small>Équipe {i + 1} · buzzer {KEY_LABELS[i]}</small>
-                <strong>{team.name}</strong>
-                <span>{team.members.length ? team.members.join(' · ') : 'Équipe préconfigurée'}</span>
-              </div>
-              <kbd>{KEY_LABELS[i]}</kbd>
-            </div>
-          ))}
-        </div>
-
-        <div className="registration-note"><ShieldCheck size={17}/><span>Les scores sont gardés uniquement en mémoire sur le serveur pendant la session. Aucun fichier de persistance n’est créé.</span></div>
-        <div className="entry-actions">
-          <button className="primary-btn team-entry-btn" type="button" onClick={() => setShowTeamLogin(true)}><Users size={17}/> Connexion participant</button>
-          {!adminAuthenticated && <button className="secondary-btn admin-entry-btn" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={16}/> Connexion admin</button>}
-        </div>
+        <div className="home-note"><ShieldCheck size={17}/><span>Aucun compte participant à créer. Les scores vivent uniquement en mémoire du serveur pendant la session.</span></div>
+        {!adminAuthenticated && <button className="secondary-btn admin-access-wide" type="button" onClick={() => setShowAdminLogin(true)}><KeyRound size={16}/> Accès administrateur</button>}
         {adminAuthenticated && <div className="admin-ready-panel">
-          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>Connexion validée · cliquez sur Lancer les qualifications</small></span></div>
-          <button className="primary-btn launch-competition" onClick={launch} disabled={!isReady}><Play size={17}/> Lancer les qualifications</button>
+          <div><ShieldCheck size={19}/><span><strong>Mode administrateur actif</strong><small>Mot de passe validé · la compétition peut démarrer</small></span></div>
+          <button className="primary-btn launch-competition" onClick={launch}><Play size={17}/> Lancer les qualifications</button>
         </div>}
-        {!adminAuthenticated && <button className="primary-btn wide launch-competition" onClick={launch}><LogIn size={17}/> Connexion admin puis lancement</button>}
-        {showTeamLogin && <TeamLoginModal loginTeam={loginTeam} teams={teams} onClose={() => setShowTeamLogin(false)}/>}
-        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={() => setShowAdminLogin(false)} canLaunch={false}/>} 
+        {showAdminLogin && <AdminLoginModal loginAdmin={loginAdmin} onClose={() => setShowAdminLogin(false)} onSuccess={() => setShowAdminLogin(false)} canLaunch={false}/>}
       </section>
     </main>
   )
